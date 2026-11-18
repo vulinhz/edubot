@@ -19,7 +19,9 @@ import {
   ResourceStatus,
   KnowledgeNode,
   LearningProgress,
-  isLessonVerified,
+  CurriculumTopic,
+  WrongQuestionStat,
+  SystemSettings,
 } from './types/index.ts';
 import {
   auth,
@@ -31,6 +33,7 @@ import {
 import { Navbar } from './components/Navbar.tsx';
 import { LandingPage } from './components/LandingPage.tsx';
 import { StudentDashboard } from './components/student/StudentDashboard.tsx';
+import { LearningLibrary } from './components/student/LearningLibrary.tsx';
 import { LessonViewer } from './components/student/LessonViewer.tsx';
 import { ExerciseRunner } from './components/student/ExerciseRunner.tsx';
 import { EduBotTutorChat } from './components/student/EduBotTutorChat.tsx';
@@ -46,13 +49,9 @@ import { AdminDashboard } from './components/admin/AdminDashboard.tsx';
 import { AuthModal } from './components/auth/AuthModal.tsx';
 import { PrivacyCenterModal } from './components/privacy/PrivacyCenterModal.tsx';
 import {
-  ArrowRight,
   PlayCircle,
-  FileCheck2,
   Lock,
-  Search,
   LogIn,
-  BookOpen,
   AlertCircle,
   ShieldCheck,
 } from 'lucide-react';
@@ -106,24 +105,32 @@ export default function App() {
     return 'landing';
   });
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>('all');
-  const [lessonSearch, setLessonSearch] = useState<string>('');
 
   // Backend & Firestore state
   const [subjects, setSubjects] = useState<CurriculumSubject[]>([]);
+  const [topics, setTopics] = useState<CurriculumTopic[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [exercises, setExercises] = useState<ExerciseSet[]>([]);
   const [classes, setClasses] = useState<ClassRoom[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [submissions, setSubmissions] = useState<StudentSubmission[]>([]);
   const [learningProgress, setLearningProgress] = useState<LearningProgress[]>([]);
+  const [favoriteLessonIds, setFavoriteLessonIds] = useState<string[]>([]);
+  const [lastOpenedLessonId, setLastOpenedLessonId] = useState<string | null>(null);
+  const [wrongQuestions, setWrongQuestions] = useState<WrongQuestionStat[]>([]);
+  const [recommendedReviewLessons, setRecommendedReviewLessons] = useState<
+    { id: string; title: string; subjectId: string; grade: number; estimatedDuration?: number }[]
+  >([]);
   const [drafts, setDrafts] = useState<AiDraftItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
   const [systemPolicy, setSystemPolicy] = useState<{
-    childSafetyFilterEnabled: boolean;
+    childSafetyFilterEnabled?: boolean;
     parentalConsentRequired: boolean;
     leaderboardEnabled: boolean;
     curriculumStandard: string;
+    textbookSeries?: string;
+    textbookSeriesLabel?: string;
   } | null>(null);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -298,14 +305,16 @@ export default function App() {
 
     async function loadPublicData() {
       try {
-        const [subRes, lesRes, exRes, knwRes] = await Promise.all([
+        const [subRes, topRes, lesRes, exRes, knwRes] = await Promise.all([
           fetch(`/api/curriculum/subjects${gradeQuery}`),
+          fetch(`/api/curriculum/topics${gradeQuery}`),
           fetch(`/api/curriculum/lessons${gradeQuery}`),
           fetch(`/api/exercises${gradeQuery}`),
           fetch('/api/knowledge-map', { headers: authHeaders }),
         ]);
 
         if (subRes.ok) setSubjects(await subRes.json());
+        if (topRes.ok) setTopics(await topRes.json());
         if (lesRes.ok) setLessons(await lesRes.json());
         if (exRes.ok) setExercises(await exRes.json());
         if (knwRes.ok) setKnowledgeNodes(await knwRes.json());
@@ -316,6 +325,22 @@ export default function App() {
     loadPublicData();
   }, [selectedGrade, currentUser?.role, authToken, submissions.length, learningProgress.length]);
 
+  const refreshWrongQuestions = useCallback(async () => {
+    if (!authToken) return;
+    try {
+      const res = await fetch('/api/analytics/wrong-questions', {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setWrongQuestions(data.wrongQuestions || []);
+        setRecommendedReviewLessons(data.recommendedLessons || []);
+      }
+    } catch {
+      // ignore
+    }
+  }, [authToken]);
+
   // Authenticated role-scoped loading
   const loadAuthenticatedData = useCallback(async () => {
     if (!authToken || !currentUser) {
@@ -323,6 +348,10 @@ export default function App() {
       setAssignments([]);
       setSubmissions([]);
       setLearningProgress([]);
+      setFavoriteLessonIds([]);
+      setLastOpenedLessonId(null);
+      setWrongQuestions([]);
+      setRecommendedReviewLessons([]);
       setDrafts([]);
       setAuditLogs([]);
       return;
@@ -340,23 +369,47 @@ export default function App() {
         currentUser.role === 'student'
           ? fetch('/api/learning-progress', { headers })
           : Promise.resolve(null);
+      const favoritesP =
+        currentUser.role === 'student' ? fetch('/api/favorites', { headers }) : Promise.resolve(null);
+      const lastOpenedP =
+        currentUser.role === 'student'
+          ? fetch('/api/learning-progress/last-opened', { headers })
+          : Promise.resolve(null);
+      const wrongP = fetch('/api/analytics/wrong-questions', { headers });
       const draftsP = isStaff ? fetch('/api/ai/drafts', { headers }) : Promise.resolve(null);
       const auditP =
         currentUser.role === 'admin' ? fetch('/api/audit-logs', { headers }) : Promise.resolve(null);
 
-      const [classesRes, assignRes, subRes, progRes, draftsRes, auditRes] = await Promise.all([
-        classesP,
-        assignmentsP,
-        submissionsP,
-        progressP,
-        draftsP,
-        auditP,
-      ]);
+      const [classesRes, assignRes, subRes, progRes, favRes, lastRes, wrongRes, draftsRes, auditRes] =
+        await Promise.all([
+          classesP,
+          assignmentsP,
+          submissionsP,
+          progressP,
+          favoritesP,
+          lastOpenedP,
+          wrongP,
+          draftsP,
+          auditP,
+        ]);
 
       if (classesRes.ok) setClasses(await classesRes.json());
       if (assignRes.ok) setAssignments(await assignRes.json());
       if (subRes.ok) setSubmissions(await subRes.json());
       if (progRes && progRes.ok) setLearningProgress(await progRes.json());
+      if (favRes && favRes.ok) {
+        const favData = await favRes.json();
+        setFavoriteLessonIds(favData.lessonIds || []);
+      }
+      if (lastRes && lastRes.ok) {
+        const lastData = await lastRes.json();
+        setLastOpenedLessonId(lastData?.lessonId || null);
+      }
+      if (wrongRes && wrongRes.ok) {
+        const wrongData = await wrongRes.json();
+        setWrongQuestions(wrongData.wrongQuestions || []);
+        setRecommendedReviewLessons(wrongData.recommendedLessons || []);
+      }
       if (draftsRes && draftsRes.ok) setDrafts(await draftsRes.json());
       else setDrafts([]);
       if (auditRes && auditRes.ok) setAuditLogs(await auditRes.json());
@@ -418,6 +471,10 @@ export default function App() {
     setAssignments([]);
     setSubmissions([]);
     setLearningProgress([]);
+    setFavoriteLessonIds([]);
+    setLastOpenedLessonId(null);
+    setWrongQuestions([]);
+    setRecommendedReviewLessons([]);
     setDrafts([]);
     setAuditLogs([]);
     navigateTab('landing');
@@ -441,7 +498,34 @@ export default function App() {
 
   const handleOpenLesson = (lessonId: string) => {
     setActiveLessonId(lessonId);
+    setLastOpenedLessonId(lessonId);
     setActiveTab('lesson-detail');
+  };
+
+  const handleToggleFavorite = async (lessonId: string) => {
+    const isFav = favoriteLessonIds.includes(lessonId);
+    if (!authToken) {
+      setFavoriteLessonIds((prev) =>
+        isFav ? prev.filter((id) => id !== lessonId) : [...prev, lessonId]
+      );
+      return;
+    }
+    try {
+      const res = await fetch(isFav ? `/api/favorites/${lessonId}` : '/api/favorites', {
+        method: isFav ? 'DELETE' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: isFav ? undefined : JSON.stringify({ lessonId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFavoriteLessonIds(data.lessonIds || []);
+      }
+    } catch {
+      // fallback gracefully
+    }
   };
 
   const handleOpenExercise = (exerciseSetId: string, assignmentId?: string) => {
@@ -568,15 +652,6 @@ export default function App() {
         ) || null
       : null;
 
-  const filteredLessons = lessons.filter((les) => {
-    const matchSubject = selectedSubjectFilter === 'all' || les.subjectId === selectedSubjectFilter;
-    const matchQuery =
-      !lessonSearch.trim() ||
-      les.title.toLowerCase().includes(lessonSearch.trim().toLowerCase()) ||
-      les.lessonCode.toLowerCase().includes(lessonSearch.trim().toLowerCase());
-    return matchSubject && matchQuery;
-  });
-
   const filteredExercises = exercises.filter(
     (ex) => selectedSubjectFilter === 'all' || ex.subjectId === selectedSubjectFilter
   );
@@ -696,6 +771,8 @@ export default function App() {
                 lessons={lessons}
                 submissions={submissions}
                 learningProgress={learningProgress}
+                lastOpenedLessonId={lastOpenedLessonId}
+                recommendedReviewLessons={recommendedReviewLessons}
                 onSelectSubject={(subId) => {
                   setSelectedSubjectFilter(subId);
                   navigateTab('lessons');
@@ -710,122 +787,30 @@ export default function App() {
             )}
 
             {activeTab === 'lessons' && (
-              <div className="max-w-4xl mx-auto space-y-6 pb-16">
-                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-                  <div>
-                    <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white font-display">
-                      Kho Bài Giảng & Học Liệu Lớp {selectedGrade}
-                    </h1>
-                    <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                      Nội dung chuẩn hóa theo Chương trình GDPT 2018 và Thông tư 17/2025/TT-BGDĐT.
-                    </p>
-                  </div>
-
-                  <div className="relative w-full sm:w-64">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={lessonSearch}
-                      onChange={(e) => setLessonSearch(e.target.value)}
-                      placeholder="Tìm tên bài hoặc mã bài..."
-                      className="w-full pl-9 pr-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Subject Filter Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => setSelectedSubjectFilter('all')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                      selectedSubjectFilter === 'all'
-                        ? 'bg-cyan-600 text-white'
-                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-                    }`}
-                  >
-                    Tất cả môn ({lessons.length})
-                  </button>
-                  {subjects.map((sub) => (
-                    <button
-                      key={sub.id}
-                      onClick={() => setSelectedSubjectFilter(sub.id)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                        selectedSubjectFilter === sub.id
-                          ? 'bg-cyan-600 text-white'
-                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-                      }`}
-                    >
-                      {sub.name}
-                    </button>
-                  ))}
-                </div>
-
-                {filteredLessons.length === 0 ? (
-                  <div className="bg-white dark:bg-slate-900 p-10 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-2">
-                    <BookOpen className="w-8 h-8 text-slate-300 mx-auto" />
-                    <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                      Chưa có bài học phù hợp bộ lọc
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      Hãy thử đổi khối lớp, chọn &ldquo;Tất cả môn&rdquo; hoặc xóa từ khóa tìm kiếm.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {filteredLessons.map((les) => {
-                      const verified = isLessonVerified(les.status);
-                      const pending = les.status === 'pending' || les.status === 'NEEDS_REVIEW';
-                      return (
-                        <div
-                          key={les.id}
-                          onClick={() => handleOpenLesson(les.id)}
-                          className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 hover:border-cyan-400 dark:hover:border-cyan-600 transition-all cursor-pointer shadow-sm group flex flex-col justify-between"
-                        >
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-mono text-cyan-600 dark:text-cyan-400 font-semibold">
-                                {les.lessonCode}
-                              </span>
-                              <span
-                                className={`text-[11px] font-semibold flex items-center gap-1 ${
-                                  verified
-                                    ? 'text-emerald-600 dark:text-emerald-400'
-                                    : pending
-                                    ? 'text-amber-600 dark:text-amber-400'
-                                    : 'text-slate-500'
-                                }`}
-                              >
-                                <FileCheck2 className="w-3.5 h-3.5" />
-                                <span>
-                                  {verified ? 'Đã thẩm định' : pending ? 'Chờ duyệt' : 'Chưa xác minh'}
-                                </span>
-                              </span>
-                            </div>
-
-                            <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
-                              {les.title}
-                            </h3>
-
-                            <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{les.summary}</p>
-                          </div>
-
-                          <div className="pt-4 mt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-semibold text-cyan-600 dark:text-cyan-400">
-                            <span>Học bài ngay</span>
-                            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              <LearningLibrary
+                selectedGrade={selectedGrade}
+                onGradeChange={(g) => setSelectedGrade(g)}
+                subjects={subjects}
+                topics={topics}
+                lessons={lessons}
+                learningProgress={learningProgress}
+                favoriteLessonIds={favoriteLessonIds}
+                lastOpenedLessonId={lastOpenedLessonId}
+                recommendedReviewLessons={recommendedReviewLessons}
+                wrongQuestions={wrongQuestions}
+                textbookSeriesLabel={systemPolicy?.textbookSeriesLabel}
+                onToggleFavorite={handleToggleFavorite}
+                onOpenLesson={handleOpenLesson}
+              />
             )}
 
             {activeTab === 'lesson-detail' && activeLesson && (
               <LessonViewer
                 lesson={activeLesson}
+                subjectName={subjects.find((s) => s.id === activeLesson.subjectId)?.name}
                 hasMatchingExercise={Boolean(exercises.find((e) => e.lessonId === activeLesson.id))}
                 isCompleted={learningProgress.some((p) => p.lessonId === activeLesson.id && p.completed)}
+                isFavorite={favoriteLessonIds.includes(activeLesson.id)}
                 authToken={authToken}
                 onBack={() => navigateTab('lessons')}
                 onOpenExercise={(lId) => {
@@ -837,6 +822,8 @@ export default function App() {
                   }
                 }}
                 onAskAi={handleAskAiAboutLesson}
+                onToggleFavorite={handleToggleFavorite}
+                onLessonOpened={(lId) => setLastOpenedLessonId(lId)}
                 onProgressUpdated={(lessonId, xpEarned) => {
                   if (xpEarned > 0) {
                     setCurrentUser((u) => (u ? { ...u, xp: (u.xp || 0) + xpEarned } : u));
@@ -869,11 +856,38 @@ export default function App() {
               <div className="max-w-4xl mx-auto space-y-6 pb-16">
                 <div>
                   <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white font-display">
-                    Kho Bài Tập Tương Tác & Luyện Thi (Lớp {selectedGrade})
+                    Luyện tập & Kiểm tra (Lớp {selectedGrade})
                   </h1>
                   <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                    Tự động chấm điểm, hiển thị lời giải từng bước và nạp điểm năng lượng XP vào Robot EduBot.
+                    Chấm điểm tự động các câu hỏi xác định, xem giải thích từng câu và ghi nhận tiến bộ thực tế.
                   </p>
+                </div>
+
+                {/* Subject filter strip */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setSelectedSubjectFilter('all')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                      selectedSubjectFilter === 'all'
+                        ? 'bg-cyan-600 text-white'
+                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    Tất cả môn ({exercises.length})
+                  </button>
+                  {subjects.map((sub) => (
+                    <button
+                      key={sub.id}
+                      onClick={() => setSelectedSubjectFilter(sub.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                        selectedSubjectFilter === sub.id
+                          ? 'bg-cyan-600 text-white'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
+                      }`}
+                    >
+                      {sub.name}
+                    </button>
+                  ))}
                 </div>
 
                 {!currentUser && (
@@ -894,43 +908,46 @@ export default function App() {
                 {filteredExercises.length === 0 ? (
                   <div className="bg-white dark:bg-slate-900 p-10 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-2">
                     <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                      Chưa có bộ bài tập cho Khối {selectedGrade}
+                      Chưa có bộ bài tập cho môn hoặc khối lớp đã chọn
                     </div>
                     <p className="text-xs text-slate-500">
-                      Hãy chuyển sang khối lớp khác hoặc nhấn &ldquo;Tất cả môn&rdquo; ở Kho bài giảng.
+                      Hãy chuyển sang khối lớp khác hoặc nhấn &ldquo;Tất cả môn&rdquo;.
                     </p>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {filteredExercises.map((ex) => (
-                      <div
-                        key={ex.id}
-                        className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                      >
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <span className="font-semibold text-cyan-600 dark:text-cyan-400 uppercase">
-                              {ex.subjectId}
-                            </span>
-                            <span aria-hidden="true">·</span>
-                            <span>Khối {ex.grade}</span>
-                            <span aria-hidden="true">·</span>
-                            <span>Thời lượng: {ex.durationMinutes} phút</span>
-                            <span aria-hidden="true">·</span>
-                            <span>{ex.questions.length} câu hỏi</span>
-                          </div>
-                          <h3 className="text-base font-bold text-slate-900 dark:text-white">{ex.title}</h3>
-                        </div>
-
-                        <button
-                          onClick={() => handleOpenExercise(ex.id)}
-                          className="px-5 py-2.5 text-xs font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-xl transition-colors whitespace-nowrap flex items-center gap-1.5 self-start sm:self-auto"
+                    {filteredExercises.map((ex) => {
+                      const subLabel = subjects.find((s) => s.id === ex.subjectId)?.name || ex.subjectId;
+                      return (
+                        <div
+                          key={ex.id}
+                          className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                         >
-                          <PlayCircle className="w-4 h-4" />
-                          <span>Bắt đầu làm bài</span>
-                        </button>
-                      </div>
-                    ))}
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                              <span className="font-semibold text-cyan-600 dark:text-cyan-400">
+                                {subLabel}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span>Lớp {ex.grade}</span>
+                              <span aria-hidden="true">·</span>
+                              <span>{ex.durationMinutes} phút</span>
+                              <span aria-hidden="true">·</span>
+                              <span>{ex.questions.length} câu hỏi</span>
+                            </div>
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">{ex.title}</h3>
+                          </div>
+
+                          <button
+                            onClick={() => handleOpenExercise(ex.id)}
+                            className="px-5 py-2.5 text-xs font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-xl transition-colors whitespace-nowrap flex items-center gap-1.5 self-start sm:self-auto"
+                          >
+                            <PlayCircle className="w-4 h-4" />
+                            <span>Bắt đầu làm bài</span>
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -941,15 +958,18 @@ export default function App() {
                 exercise={activeExercise}
                 assignmentId={activeAssignmentId}
                 existingGradedSubmission={activeGradedSubmission}
+                previousAttempts={submissions.filter((s) => s.exerciseSetId === activeExercise.id)}
                 studentId={currentUser?.id || 'guest'}
                 studentName={currentUser?.name || 'Khách'}
                 grade={selectedGrade}
                 authToken={authToken}
                 onRequireAuth={() => handleOpenAuth('login', 'student')}
                 onBack={() => navigateTab('exercises')}
+                onOpenLesson={handleOpenLesson}
                 onSubmittedSuccess={(sub, xp) => {
                   setSubmissions((prev) => [sub, ...prev]);
                   setCurrentUser((u) => (u ? { ...u, xp: (u.xp || 0) + xp } : u));
+                  refreshWrongQuestions();
                 }}
               />
             )}
@@ -957,6 +977,7 @@ export default function App() {
             {activeTab === 'tutor' && currentUser && (
               <EduBotTutorChat
                 grade={selectedGrade}
+                subjects={subjects}
                 lessons={lessons}
                 initialLessonId={tutorInitialLesson.id}
                 initialLessonTitle={tutorInitialLesson.title}
@@ -1054,17 +1075,27 @@ export default function App() {
                 assignments={assignments}
                 exercises={exercises}
                 submissions={submissions}
+                lessons={lessons}
+                subjects={subjects}
                 currentUserName={currentUser.name}
                 authToken={authToken}
                 onAssignCreated={(newAssign) => setAssignments((prev) => [newAssign, ...prev])}
                 onExerciseCreated={(newEx) => setExercises((prev) => [newEx, ...prev])}
+                onClassUpdated={(updatedClass) =>
+                  setClasses((prev) => prev.map((c) => (c.id === updatedClass.id ? updatedClass : c)))
+                }
               />
             )}
 
             {activeTab === 'review-drafts' && (
               <ContentReviewer
                 drafts={drafts}
+                authToken={authToken}
                 onDraftStatusChange={handleDraftStatusChange}
+                onPublishedToCurriculum={(lesson, updatedDraft) => {
+                  setLessons((prev) => [lesson, ...prev]);
+                  setDrafts((prev) => prev.map((d) => (d.id === updatedDraft.id ? updatedDraft : d)));
+                }}
               />
             )}
           </>
@@ -1081,6 +1112,23 @@ export default function App() {
             authToken={authToken}
             onUpdateLessonStatus={handleUpdateLessonStatus}
             onLessonCreated={(newLesson) => setLessons((prev) => [newLesson, ...prev])}
+            onLessonUpdated={(updatedLesson) =>
+              setLessons((prev) => prev.map((l) => (l.id === updatedLesson.id ? updatedLesson : l)))
+            }
+            onSettingsUpdated={(updated: SystemSettings) =>
+              setSystemPolicy((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      leaderboardEnabled: updated.leaderboardEnabled,
+                      parentalConsentRequired: updated.parentalConsentRequired,
+                      curriculumStandard: updated.curriculumStandard,
+                      textbookSeries: updated.textbookSeries,
+                      textbookSeriesLabel: updated.textbookSeriesLabel,
+                    }
+                  : null
+              )
+            }
             onAuditLogsRefresh={refreshAuditLogs}
           />
         )}
@@ -1139,7 +1187,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-4 text-[11px]">
-            <span>Căn cứ TT 32/2018 & TT 17/2025/TT-BGDĐT</span>
+            <span>Tham chiếu TT 32/2018 & TT 17/2025/TT-BGDĐT</span>
             <span aria-hidden="true">·</span>
             <button
               onClick={() => setShowPrivacyModal(true)}
@@ -1149,7 +1197,7 @@ export default function App() {
               <span>Bảo vệ quyền riêng tư học sinh (NĐ 13/2023)</span>
             </button>
             <span aria-hidden="true">·</span>
-            <span>Năm học 2025 – 2026</span>
+            <span>Chương trình Tiểu học Lớp 1–5</span>
           </div>
         </div>
       </footer>

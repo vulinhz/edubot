@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { User, ClassRoom, Assignment, AiDraftItem, StudentSubmission } from '../../types/index.ts';
+import { User, ClassRoom, Assignment, AiDraftItem, StudentSubmission, WrongQuestionStat } from '../../types/index.ts';
 import { StudentDetailModal } from './StudentDetailModal.tsx';
 import teacherImage from '../../assets/images/edubot_teacher_studio_1793780438619.jpg';
 import {
@@ -63,6 +63,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [addStudentEmail, setAddStudentEmail] = useState('');
   const [addStudentError, setAddStudentError] = useState('');
   const [isAddingStudent, setIsAddingStudent] = useState(false);
+  const [topWrongQuestions, setTopWrongQuestions] = useState<WrongQuestionStat[]>([]);
 
   useEffect(() => {
     if (!authToken) return;
@@ -76,6 +77,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         }
       })
       .catch((err) => console.error(err));
+
+    fetch('/api/analytics/wrong-questions', {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.wrongQuestions)) {
+          setTopWrongQuestions(data.wrongQuestions);
+        }
+      })
+      .catch(() => {});
   }, [authToken]);
 
   const pendingDrafts = drafts.filter((d) => d.status === 'draft');
@@ -557,6 +569,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               Thống kê trực tiếp từ {submissions.length} lượt nộp bài trên hệ thống:
             </p>
 
+            {topWrongQuestions.length > 0 && (
+              <div className="space-y-2 text-xs pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="font-semibold text-slate-700 dark:text-slate-300">
+                  Câu hỏi học sinh hay làm sai:
+                </div>
+                {topWrongQuestions.slice(0, 3).map((wq) => (
+                  <div
+                    key={`${wq.exerciseSetId}-${wq.questionId}`}
+                    className="p-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-amber-900 dark:text-amber-200"
+                  >
+                    <div className="font-semibold line-clamp-2">{wq.questionText}</div>
+                    <div className="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5">
+                      Sai {wq.wrongCount}/{wq.attemptCount} lượt · {wq.lessonTitle || wq.exerciseTitle}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {topMisconceptions.length > 0 ? (
               <div className="space-y-2 text-xs">
                 {topMisconceptions.map(([tag, count], idx) => (
@@ -568,11 +599,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
                 ))}
               </div>
-            ) : (
+            ) : topWrongQuestions.length === 0 ? (
               <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 text-xs text-emerald-700 dark:text-emerald-300">
                 Chưa phát hiện lỗi sai phổ biến trong các bài nộp hiện tại.
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Struggling Students Early Warning */}

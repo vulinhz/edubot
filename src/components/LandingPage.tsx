@@ -37,27 +37,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/75 to-slate-950/40" />
 
         <div className="relative z-10 max-w-5xl mx-auto px-6 py-12 text-center space-y-6">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>NỀN TẢNG GIÁO DỤC TIỂU HỌC TƯƠNG LAI LỚP 1–5</span>
+          <div className="text-cyan-300 text-xs font-semibold uppercase tracking-wider">
+            Nền tảng học tập tiểu học Lớp 1–5
           </div>
 
           <h1 className="text-3xl sm:text-5xl md:text-6xl font-extrabold tracking-tight font-display text-white max-w-4xl mx-auto leading-tight">
-            EduBot AI – <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400">Future Learning Ecosystem</span>
+            EduBot <span className="text-cyan-400">AI</span>
           </h1>
 
           <p className="text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed">
-            “Học thông minh – Khám phá tương lai”. Hệ sinh thái học tập chuẩn hóa theo Chương trình GDPT 2018 (Thông tư 32/2018/TT-BGDĐT & TT 17/2025/TT-BGDĐT), tích hợp gia sư Robot AI 3D và trợ lý sư phạm cho giáo viên Việt Nam.
+            Kho bài giảng theo từng khối lớp 1–5, bài tập luyện tập tương tác chấm điểm tự động và gia sư Robot AI gợi mở từng bước cho học sinh tiểu học.
           </p>
 
           {/* Quick Entry CTAs */}
           <div className="pt-4 flex flex-wrap items-center justify-center gap-3">
             <button
               onClick={() => onEnterRole('student', 4)}
-              className="px-6 py-3.5 text-sm font-semibold text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 rounded-xl transition-all shadow-lg shadow-cyan-500/25 flex items-center gap-2 group"
+              className="px-6 py-3.5 text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-xl transition-colors flex items-center gap-2 group"
             >
               <Bot className="w-4 h-4" />
-              <span>Vào học cùng EduBot (Lớp 4)</span>
+              <span>Vào học cùng EduBot</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
 

@@ -171,8 +171,8 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({
         )}
 
         {loading ? (
-          <div className="py-12 text-center text-xs text-slate-400 animate-pulse">
-            Đang tải dữ liệu học tập từ máy chủ EduBot...
+          <div className="py-12 text-center text-xs text-slate-400">
+            Đang tải dữ liệu học tập của học sinh...
           </div>
         ) : errorMsg && !performanceData ? (
           <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">

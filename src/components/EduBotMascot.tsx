@@ -38,9 +38,9 @@ export const EduBotMascot: React.FC<EduBotMascotProps> = ({
         <div
           className={`absolute -inset-1.5 rounded-full blur-md opacity-70 transition duration-500 ${
             expression === 'celebrating'
-              ? 'bg-gradient-to-r from-amber-400 via-pink-500 to-cyan-400 animate-pulse'
+              ? 'bg-gradient-to-r from-amber-400 via-pink-500 to-cyan-400'
               : expression === 'thinking'
-              ? 'bg-gradient-to-r from-purple-500 to-indigo-500 animate-pulse'
+              ? 'bg-gradient-to-r from-purple-500 to-indigo-500'
               : 'bg-gradient-to-r from-cyan-400 to-blue-500'
           }`}
         />
@@ -78,9 +78,9 @@ export const EduBotMascot: React.FC<EduBotMascotProps> = ({
             <span
               className={`w-1.5 h-1.5 rounded-full ${
                 expression === 'thinking'
-                  ? 'bg-purple-400 animate-ping'
+                  ? 'bg-purple-400'
                   : expression === 'celebrating'
-                  ? 'bg-amber-400 animate-bounce'
+                  ? 'bg-amber-400'
                   : 'bg-cyan-400'
               }`}
             />

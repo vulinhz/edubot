@@ -161,9 +161,9 @@ export const GamificationJourney: React.FC<GamificationJourneyProps> = ({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2">
             <Layers className="w-5 h-5 text-cyan-500" />
-            <span>Bản đồ các chặng học tập Lớp {userGrade}</span>
+            <span>Các chặng học tập Lớp {userGrade}</span>
           </h2>
-          <span className="text-xs text-slate-500 font-medium">Bám sát CTGDPT 2018 &amp; TT 17/2025</span>
+          <span className="text-xs text-slate-500 font-medium">Lộ trình từng bước</span>
         </div>
 
         <div className="relative border-l-2 border-slate-200 dark:border-slate-800 ml-4 pl-6 space-y-8">
@@ -177,7 +177,7 @@ export const GamificationJourney: React.FC<GamificationJourneyProps> = ({
                     isCompleted
                       ? 'bg-emerald-500 border-emerald-400 text-white'
                       : isActive
-                      ? 'bg-cyan-500 border-cyan-300 text-white ring-4 ring-cyan-500/20 animate-pulse'
+                      ? 'bg-cyan-500 border-cyan-300 text-white ring-4 ring-cyan-500/20'
                       : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-400'
                   }`}
                 >

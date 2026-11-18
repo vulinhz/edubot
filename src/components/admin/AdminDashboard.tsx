@@ -14,6 +14,8 @@ import {
   User,
   UserRole,
   SystemSettings,
+  TextbookSeries,
+  TEXTBOOK_SERIES_LABELS,
   isLessonVerified,
 } from '../../types/index.ts';
 import {
@@ -45,6 +47,7 @@ import {
   CloudUpload,
   Calendar,
   X,
+  Edit3,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -56,6 +59,8 @@ interface AdminDashboardProps {
   authToken?: string | null;
   onUpdateLessonStatus: (lessonId: string, status: ResourceStatus) => Promise<void> | void;
   onLessonCreated?: (lesson: Lesson) => void;
+  onLessonUpdated?: (lesson: Lesson) => void;
+  onSettingsUpdated?: (settings: SystemSettings) => void;
   onAuditLogsRefresh?: () => Promise<void> | void;
 }
 
@@ -86,6 +91,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   authToken,
   onUpdateLessonStatus,
   onLessonCreated,
+  onLessonUpdated,
+  onSettingsUpdated,
   onAuditLogsRefresh,
 }) => {
   const [selectedTab, setSelectedTab] = useState<AdminTab>('curriculum');
@@ -103,6 +110,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [settingsMessage, setSettingsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [lessonFilterGrade, setLessonFilterGrade] = useState<number | 'all'>('all');
+  const [lessonFilterSubject, setLessonFilterSubject] = useState<string>('all');
+  const [lessonFilterStatus, setLessonFilterStatus] = useState<'all' | 'verified' | 'pending' | 'unverified'>('all');
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Create Lesson Modal
@@ -115,6 +124,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newLessonSummary, setNewLessonSummary] = useState('');
   const [newLessonStatus, setNewLessonStatus] = useState<'DRAFT' | 'NEEDS_REVIEW'>('NEEDS_REVIEW');
   const [creatingLesson, setCreatingLesson] = useState(false);
+
+  // Edit Lesson Modal
+  const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editSummary, setEditSummary] = useState('');
+  const [editCurriculum, setEditCurriculum] = useState<TextbookSeries>('kntt');
+  const [editChapter, setEditChapter] = useState('');
+  const [editSourceBook, setEditSourceBook] = useState('');
+  const [editCoreKnowledge, setEditCoreKnowledge] = useState('');
+  const [savingEditLesson, setSavingEditLesson] = useState(false);
 
   // Academic Years & Firestore Sync
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
@@ -246,6 +265,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       fetchUsers();
     } else if (selectedTab === 'framework') {
       fetchAcademicYears();
+      fetchSettings();
     } else if (selectedTab === 'security') {
       fetchSettings();
     } else if (selectedTab === 'audit') {
@@ -439,6 +459,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setSettingsMessage({ type: 'error', text: data.error || 'Không thể lưu cấu hình hệ thống.' });
       } else {
         setSettings(data.settings);
+        onSettingsUpdated?.(data.settings);
         setSettingsMessage({ type: 'success', text: 'Đã lưu cấu hình an toàn trẻ em và hệ thống thành công!' });
         if (onAuditLogsRefresh) onAuditLogsRefresh();
       }
@@ -449,13 +470,111 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleSaveTextbookSeries = async (series: TextbookSeries) => {
+    if (!authToken) return;
+    setSettingsSaving(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/system/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ textbookSeries: series }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setActionMessage({ type: 'error', text: data.error || 'Không thể đổi bộ sách mặc định.' });
+      } else {
+        setSettings(data.settings);
+        onSettingsUpdated?.(data.settings);
+        setActionMessage({
+          type: 'success',
+          text: `Đã chuyển bộ sách giáo khoa mặc định sang "${TEXTBOOK_SERIES_LABELS[series]}".`,
+        });
+        if (onAuditLogsRefresh) onAuditLogsRefresh();
+      }
+    } catch {
+      setActionMessage({ type: 'error', text: 'Lỗi kết nối khi cập nhật bộ sách.' });
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const openEditLessonModal = (lesson: Lesson) => {
+    setEditingLesson(lesson);
+    setEditTitle(lesson.title);
+    setEditSummary(lesson.summary);
+    setEditCurriculum(lesson.curriculum || 'kntt');
+    setEditChapter(lesson.chapter || '');
+    setEditSourceBook(lesson.sourceBook || TEXTBOOK_SERIES_LABELS[lesson.curriculum || 'kntt']);
+    setEditCoreKnowledge((lesson.coreKnowledge || []).join('\n'));
+  };
+
+  const handleSaveEditLesson = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authToken || !editingLesson || !editTitle.trim()) return;
+    setSavingEditLesson(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/curriculum/lessons/${editingLesson.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          title: editTitle.trim(),
+          summary: editSummary.trim(),
+          curriculum: editCurriculum,
+          chapter: editChapter.trim() || undefined,
+          sourceBook: editSourceBook.trim(),
+          coreKnowledge: editCoreKnowledge
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setActionMessage({ type: 'error', text: data.error || 'Không thể cập nhật nội dung bài học.' });
+      } else if (data.lesson) {
+        onLessonUpdated?.(data.lesson);
+        setEditingLesson(null);
+        setActionMessage({
+          type: 'success',
+          text: `Đã cập nhật bài học "${data.lesson.title}" và đồng bộ kho học liệu.`,
+        });
+        if (onAuditLogsRefresh) onAuditLogsRefresh();
+      }
+    } catch {
+      setActionMessage({ type: 'error', text: 'Lỗi kết nối khi lưu chỉnh sửa bài học.' });
+    } finally {
+      setSavingEditLesson(false);
+    }
+  };
+
   const verifiedCount = lessons.filter((l) => isLessonVerified(l.status)).length;
   const pendingCount = lessons.filter((l) => l.status === 'pending' || l.status === 'NEEDS_REVIEW').length;
   const unverifiedCount = lessons.filter(
     (l) => !isLessonVerified(l.status) && l.status !== 'pending' && l.status !== 'NEEDS_REVIEW'
   ).length;
-  const filteredLessons =
-    lessonFilterGrade === 'all' ? lessons : lessons.filter((l) => l.grade === lessonFilterGrade);
+
+  const eligibleCreateSubjects = subjects.filter((s) => s.grades.includes(newLessonGrade));
+
+  const filteredLessons = lessons.filter((l) => {
+    if (lessonFilterGrade !== 'all' && l.grade !== lessonFilterGrade) return false;
+    if (lessonFilterSubject !== 'all' && l.subjectId !== lessonFilterSubject) return false;
+    if (lessonFilterStatus === 'verified' && !isLessonVerified(l.status)) return false;
+    if (lessonFilterStatus === 'pending' && l.status !== 'pending' && l.status !== 'NEEDS_REVIEW') return false;
+    if (
+      lessonFilterStatus === 'unverified' &&
+      (isLessonVerified(l.status) || l.status === 'pending' || l.status === 'NEEDS_REVIEW')
+    )
+      return false;
+    return true;
+  });
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-16">
@@ -470,7 +589,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             Quản Trị Chương Trình GDPT & An Toàn Dữ Liệu
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-            Căn cứ pháp lý: Thông tư 32/2018/TT-BGDĐT, Thông tư 17/2025/TT-BGDĐT và chuẩn thẩm định học liệu số Lớp 1–5 năm 2026.
+            Khung học liệu tham chiếu theo Chương trình GDPT 2018 (Thông tư 32/2018/TT-BGDĐT) và Thông tư 17/2025/TT-BGDĐT cho cấp Tiểu học (Lớp 1–5).
           </p>
         </div>
 
@@ -561,7 +680,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}
         >
           <BookOpen className="w-4 h-4" />
-          <span>Khung GDPT 2026 ({subjects.length} môn)</span>
+          <span>Khung CTGDPT 2018 ({subjects.length} môn)</span>
         </button>
 
         <button
@@ -640,7 +759,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="text-xl font-bold text-slate-900 dark:text-white font-mono">
                   {subjects.length} Môn học
                 </div>
-                <div className="text-xs text-slate-500">Kho dữ liệu GDPT 2026</div>
+                <div className="text-xs text-slate-500">Kho học liệu CTGDPT 2018</div>
               </div>
             </div>
           </div>
@@ -670,6 +789,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </button>
                   ))}
                 </div>
+                <select
+                  aria-label="Lọc theo môn học"
+                  value={lessonFilterSubject}
+                  onChange={(e) => setLessonFilterSubject(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium"
+                >
+                  <option value="all">Tất cả môn</option>
+                  {subjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Lọc theo trạng thái"
+                  value={lessonFilterStatus}
+                  onChange={(e) =>
+                    setLessonFilterStatus(e.target.value as 'all' | 'verified' | 'pending' | 'unverified')
+                  }
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium"
+                >
+                  <option value="all">Mọi trạng thái</option>
+                  <option value="verified">Đã thẩm định</option>
+                  <option value="pending">Chờ duyệt</option>
+                  <option value="unverified">Bản nháp / Chưa xác minh</option>
+                </select>
                 <button
                   onClick={() => setShowCreateLessonModal(true)}
                   className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold flex items-center gap-1.5"
@@ -691,7 +836,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <tr>
                       <th className="px-5 py-3.5">Mã & Tên bài</th>
                       <th className="px-5 py-3.5">Khối & Môn</th>
-                      <th className="px-5 py-3.5">Văn bản căn cứ</th>
+                      <th className="px-5 py-3.5">Bộ sách & Căn cứ</th>
                       <th className="px-5 py-3.5">Trạng thái thẩm định</th>
                       <th className="px-5 py-3.5 text-right">Thao tác</th>
                     </tr>
@@ -708,11 +853,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="font-mono text-[10px] text-cyan-600 dark:text-cyan-400">{l.lessonCode}</div>
                           </td>
                           <td className="px-5 py-4">
-                            Lớp {l.grade} · {l.subjectId.toUpperCase()}
+                            Lớp {l.grade} · {subjects.find((s) => s.id === l.subjectId)?.name || l.subjectId.toUpperCase()}
                           </td>
                           <td className="px-5 py-4">
-                            <div>{l.officialReference.docNumber}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">{l.officialReference.curriculumVersion}</div>
+                            <div>{l.sourceBook || TEXTBOOK_SERIES_LABELS[l.curriculum || 'kntt']}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{l.officialReference.docNumber}</div>
                           </td>
                           <td className="px-5 py-4">
                             <span
@@ -735,6 +880,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </td>
                           <td className="px-5 py-4 text-right">
                             <div className="inline-flex gap-1.5">
+                              <button
+                                onClick={() => openEditLessonModal(l)}
+                                className="px-2.5 py-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold inline-flex items-center gap-1 transition-colors"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Sửa</span>
+                              </button>
                               {!verified && (
                                 <button
                                   onClick={() => onUpdateLessonStatus(l.id, 'verified')}
@@ -764,9 +916,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* Tab 2: Curriculum Framework (GDPT 2026) & Academic Years & Firestore Sync */}
+      {/* Tab 2: Curriculum Framework (CTGDPT 2018) & Textbook Series & Academic Years */}
       {selectedTab === 'framework' && (
         <div className="space-y-6">
+          {/* Active Textbook Series Selector */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-purple-600" />
+                <span>Bộ sách giáo khoa ưu tiên toàn hệ thống</span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Chọn bộ sách giáo khoa mặc định hiển thị tại Kho học liệu (ưu tiên Kết nối tri thức với cuộc sống).
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(['kntt', 'ctst', 'cd', 'khac'] as TextbookSeries[]).map((series) => {
+                const active = (settings?.textbookSeries || 'kntt') === series;
+                return (
+                  <button
+                    key={series}
+                    type="button"
+                    disabled={settingsSaving}
+                    onClick={() => handleSaveTextbookSeries(series)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                      active
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {TEXTBOOK_SERIES_LABELS[series]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Cloud Firestore Migration Bar */}
           <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1">
@@ -877,7 +1062,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-4">
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white font-display">
-                Cấu trúc Môn học & Phân bổ Khối lớp (CTGDPT 2018 / Cập nhật 2026)
+                Cấu trúc Môn học & Phân bổ Khối lớp (CTGDPT 2018)
               </h2>
               <p className="text-xs text-slate-500 mt-1">
                 Danh mục các môn học chính thức trong kho dữ liệu học liệu tiểu học (Lớp 1 đến Lớp 5).
@@ -1241,7 +1426,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    Bộ sách giáo khoa ưu tiên
+                  </label>
+                  <select
+                    value={settings.textbookSeries || 'kntt'}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        textbookSeries: e.target.value as TextbookSeries,
+                        textbookSeriesLabel: TEXTBOOK_SERIES_LABELS[e.target.value as TextbookSeries],
+                      })
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  >
+                    {(['kntt', 'ctst', 'cd', 'khac'] as TextbookSeries[]).map((key) => (
+                      <option key={key} value={key}>
+                        {TEXTBOOK_SERIES_LABELS[key]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 md:col-span-2">
                   <div className="space-y-1.5">
                     <label className="font-semibold text-slate-700 dark:text-slate-300">
                       Thời hạn lưu trữ (ngày)
@@ -1257,14 +1465,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                   <div className="space-y-1.5">
                     <label className="font-semibold text-slate-700 dark:text-slate-300">
-                      Năm phiên bản GDPT
+                      Năm ban hành chương trình
                     </label>
                     <input
                       type="number"
                       min={2018}
                       max={2035}
                       value={settings.curriculumVersionYear}
-                      onChange={(e) => setSettings({ ...settings, curriculumVersionYear: Number(e.target.value) || 2026 })}
+                      onChange={(e) => setSettings({ ...settings, curriculumVersionYear: Number(e.target.value) || 2018 })}
                       className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
                     />
                   </div>
@@ -1336,29 +1544,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-semibold text-slate-700 dark:text-slate-300">Môn học</label>
-                  <select
-                    value={newLessonSubject}
-                    onChange={(e) => setNewLessonSubject(e.target.value)}
-                    className="mt-1 w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  >
-                    {subjects.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
                   <label className="font-semibold text-slate-700 dark:text-slate-300">Khối lớp</label>
                   <select
                     value={newLessonGrade}
-                    onChange={(e) => setNewLessonGrade(Number(e.target.value))}
+                    onChange={(e) => {
+                      const nextGrade = Number(e.target.value);
+                      setNewLessonGrade(nextGrade);
+                      const valid = subjects.filter((s) => s.grades.includes(nextGrade));
+                      if (valid.length > 0 && !valid.some((s) => s.id === newLessonSubject)) {
+                        setNewLessonSubject(valid[0].id);
+                      }
+                    }}
                     className="mt-1 w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
                   >
                     {[1, 2, 3, 4, 5].map((g) => (
                       <option key={g} value={g}>
                         Lớp {g}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">Môn học (Lớp {newLessonGrade})</label>
+                  <select
+                    value={newLessonSubject}
+                    onChange={(e) => setNewLessonSubject(e.target.value)}
+                    className="mt-1 w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  >
+                    {eligibleCreateSubjects.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
                       </option>
                     ))}
                   </select>
@@ -1423,6 +1638,118 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white font-semibold"
                 >
                   {creatingLesson ? 'Đang tạo...' : 'Tạo bài học'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Existing Lesson */}
+      {editingLesson && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">
+                Chỉnh sửa Bài học ({editingLesson.lessonCode})
+              </h3>
+              <button
+                onClick={() => setEditingLesson(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditLesson} className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300">Tên bài học *</label>
+                <input
+                  type="text"
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="mt-1 w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">Bộ sách giáo khoa</label>
+                  <select
+                    value={editCurriculum}
+                    onChange={(e) => {
+                      const val = e.target.value as TextbookSeries;
+                      setEditCurriculum(val);
+                      setEditSourceBook(TEXTBOOK_SERIES_LABELS[val]);
+                    }}
+                    className="mt-1 w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  >
+                    {(['kntt', 'ctst', 'cd', 'khac'] as TextbookSeries[]).map((k) => (
+                      <option key={k} value={k}>
+                        {TEXTBOOK_SERIES_LABELS[k]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">Chương</label>
+                  <input
+                    type="text"
+                    value={editChapter}
+                    onChange={(e) => setEditChapter(e.target.value)}
+                    placeholder="VD: Chương 1"
+                    className="mt-1 w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300">Nguồn sách tham chiếu</label>
+                <input
+                  type="text"
+                  value={editSourceBook}
+                  onChange={(e) => setEditSourceBook(e.target.value)}
+                  className="mt-1 w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300">Tóm tắt bài học</label>
+                <textarea
+                  rows={2}
+                  value={editSummary}
+                  onChange={(e) => setEditSummary(e.target.value)}
+                  className="mt-1 w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300">
+                  Kiến thức trọng tâm (mỗi ý một dòng)
+                </label>
+                <textarea
+                  rows={4}
+                  value={editCoreKnowledge}
+                  onChange={(e) => setEditCoreKnowledge(e.target.value)}
+                  className="mt-1 w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingLesson(null)}
+                  className="px-4 py-2 rounded-xl text-slate-500 hover:text-slate-800 font-semibold"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEditLesson}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white font-semibold"
+                >
+                  {savingEditLesson ? 'Đang lưu...' : 'Lưu thay đổi'}
                 </button>
               </div>
             </form>

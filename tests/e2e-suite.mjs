@@ -554,6 +554,188 @@ async function main() {
       );
       return '0% baseline, per-student isolation, curriculum dates & Vercel CORS verified';
     });
+
+    await runTest('10. Complete Grades 1-5 CTGDPT 2018 Curriculum, Ordering/DragDrop/Essay Grading, Analytics & Admin Controls', async () => {
+      // Grade 1-2 must NOT include khoa-hoc, lich-su-dia-li, tin-hoc, cong-nghe
+      for (const g of [1, 2]) {
+        const subRes = await request(`/api/curriculum/subjects?grade=${g}`);
+        assert.equal(subRes.status, 200);
+        const ids = subRes.json.map((s) => s.id);
+        assert.ok(ids.includes('toan') && ids.includes('tieng-viet') && ids.includes('tu-nhien-xa-hoi'));
+        assert.equal(ids.includes('khoa-hoc'), false, `Grade ${g} must NOT include khoa-hoc`);
+        assert.equal(ids.includes('lich-su-dia-li'), false, `Grade ${g} must NOT include lich-su-dia-li`);
+        assert.equal(ids.includes('tin-hoc'), false, `Grade ${g} must NOT include tin-hoc`);
+        assert.equal(ids.includes('cong-nghe'), false, `Grade ${g} must NOT include cong-nghe`);
+      }
+
+      // Grade 3 includes tin-hoc & cong-nghe, excludes khoa-hoc & lich-su-dia-li
+      const g3Subs = await request('/api/curriculum/subjects?grade=3');
+      assert.equal(g3Subs.status, 200);
+      const g3Ids = g3Subs.json.map((s) => s.id);
+      assert.ok(g3Ids.includes('tin-hoc') && g3Ids.includes('cong-nghe') && g3Ids.includes('tu-nhien-xa-hoi'));
+      assert.equal(g3Ids.includes('khoa-hoc'), false);
+      assert.equal(g3Ids.includes('lich-su-dia-li'), false);
+
+      // Grade 4-5 include khoa-hoc & lich-su-dia-li, exclude tu-nhien-xa-hoi
+      for (const g of [4, 5]) {
+        const subRes = await request(`/api/curriculum/subjects?grade=${g}`);
+        assert.equal(subRes.status, 200);
+        const ids = subRes.json.map((s) => s.id);
+        assert.ok(ids.includes('khoa-hoc') && ids.includes('lich-su-dia-li') && ids.includes('tin-hoc'));
+        assert.equal(ids.includes('tu-nhien-xa-hoi'), false, `Grade ${g} must NOT include tu-nhien-xa-hoi`);
+      }
+
+      // Create mixed exercise with ordering + drag_drop + essay (linked to a real Grade 4 lesson)
+      const g4LessonsRes = await request('/api/curriculum/lessons?grade=4');
+      assert.equal(g4LessonsRes.status, 200);
+      const sampleG4Lesson = g4LessonsRes.json[0];
+      assert.ok(sampleG4Lesson, 'Grade 4 must have verified lessons');
+
+      const mixedExRes = await request('/api/exercises', {
+        method: 'POST',
+        token: approvedTeacherToken,
+        body: {
+          title: 'Kiểm tra tổng hợp Sắp xếp - Kéo thả - Tự luận',
+          subjectId: sampleG4Lesson.subjectId,
+          grade: 4,
+          lessonId: sampleG4Lesson.id,
+          durationMinutes: 15,
+          questions: [
+            {
+              type: 'ordering',
+              questionText: 'Sắp xếp các số từ bé đến lớn:',
+              items: ['12', '45', '99'],
+              correctAnswer: ['12', '45', '99'],
+              explanation: 'So sánh từ trái sang phải: 12 < 45 < 99.',
+            },
+            {
+              type: 'drag_drop',
+              questionText: 'Phân loại đơn vị đo:',
+              dragItems: ['Mét', 'Ki-lô-gam'],
+              dropZones: ['Độ dài', 'Khối lượng'],
+              correctAnswer: { 'Độ dài': 'Mét', 'Khối lượng': 'Ki-lô-gam' },
+              explanation: 'Mét đo độ dài; ki-lô-gam đo khối lượng.',
+            },
+            {
+              type: 'essay',
+              questionText: 'Nêu một ví dụ đo độ dài bàn học.',
+              correctAnswer: '',
+              rubricCriteria: ['Đo đúng đơn vị', 'Ghi rõ kết quả'],
+            },
+          ],
+        },
+      });
+      assert.equal(mixedExRes.status, 201);
+      const mixedEx = mixedExRes.json.exercise;
+      const [qOrd, qDrag, qEssay] = mixedEx.questions;
+
+      // Submit 1 wrong + 1 right + essay -> essay must NOT get auto score, pendingEssayReview=true
+      const attempt1 = await request('/api/exercises/submit', {
+        method: 'POST',
+        token: student2Token,
+        body: {
+          exerciseSetId: mixedEx.id,
+          grade: 4,
+          answers: {
+            [qOrd.id]: ['99', '12', '45'], // wrong
+            [qDrag.id]: { 'Độ dài': 'Mét', 'Khối lượng': 'Ki-lô-gam' }, // correct
+            [qEssay.id]: 'Em đo bàn học dài 120 cm.',
+          },
+          timeSpentSeconds: 70,
+        },
+      });
+      assert.equal(attempt1.status, 200);
+      assert.equal(attempt1.json.submission.score, 5, '1/2 auto-gradable right must score 5/10 (essay excluded)');
+      assert.equal(attempt1.json.submission.pendingEssayReview, true);
+      assert.equal(attempt1.json.submission.status, 'submitted');
+      assert.ok(attempt1.json.submission.wrongQuestionIds.includes(qOrd.id));
+
+      // Wrong questions & review recommendations endpoint
+      const wrongAnalytics = await request('/api/analytics/wrong-questions', { token: student2Token });
+      assert.equal(wrongAnalytics.status, 200);
+      assert.ok(wrongAnalytics.json.wrongQuestions.some((w) => w.questionId === qOrd.id));
+      assert.ok(
+        wrongAnalytics.json.recommendedLessons.some((l) => l.id === sampleG4Lesson.id),
+        'Must recommend related lesson for missed question'
+      );
+
+      // Retry with all deterministic questions correct -> score 10, still pendingEssayReview=true
+      const attempt2 = await request('/api/exercises/submit', {
+        method: 'POST',
+        token: student2Token,
+        body: {
+          exerciseSetId: mixedEx.id,
+          grade: 4,
+          answers: {
+            [qOrd.id]: ['12', '45', '99'],
+            [qDrag.id]: { 'Độ dài': 'Mét', 'Khối lượng': 'Ki-lô-gam' },
+            [qEssay.id]: 'Em dùng thước dây đo chiều dài bàn học là 1 mét 20 xăng-ti-mét.',
+          },
+          timeSpentSeconds: 60,
+        },
+      });
+      assert.equal(attempt2.status, 200);
+      assert.equal(attempt2.json.submission.score, 10);
+      assert.equal(attempt2.json.submission.attemptNumber, 2);
+
+      // Favorites + Resume tracking
+      const openRes = await request('/api/learning-progress/open', {
+        method: 'POST',
+        token: student2Token,
+        body: { lessonId: sampleG4Lesson.id },
+      });
+      assert.equal(openRes.status, 200);
+      const lastOpenRes = await request('/api/learning-progress/last-opened', { token: student2Token });
+      assert.equal(lastOpenRes.status, 200);
+      assert.equal(lastOpenRes.json.lessonId, sampleG4Lesson.id);
+
+      const favAdd = await request('/api/favorites', {
+        method: 'POST',
+        token: student2Token,
+        body: { lessonId: sampleG4Lesson.id },
+      });
+      assert.equal(favAdd.status, 200);
+      assert.ok(favAdd.json.lessonIds.includes(sampleG4Lesson.id));
+
+      const favDel = await request(`/api/favorites/${sampleG4Lesson.id}`, {
+        method: 'DELETE',
+        token: student2Token,
+      });
+      assert.equal(favDel.status, 200);
+      assert.equal(favDel.json.lessonIds.includes(sampleG4Lesson.id), false);
+
+      // Admin textbook series switcher & public-policy propagation
+      const switchRes = await request('/api/system/settings', {
+        method: 'PUT',
+        token: adminToken,
+        body: { textbookSeries: 'ctst' },
+      });
+      assert.equal(switchRes.status, 200);
+      const policyCtst = await request('/api/system/public-policy');
+      assert.equal(policyCtst.json.textbookSeries, 'ctst');
+      await request('/api/system/settings', {
+        method: 'PUT',
+        token: adminToken,
+        body: { textbookSeries: 'kntt' },
+      });
+
+      // Teacher class assigned materials + student 403 block
+      const stuMatBlock = await request(`/api/classes/${createdClassId}/materials`, {
+        method: 'PUT',
+        token: student2Token,
+        body: { assignedLessonIds: [sampleG4Lesson.id] },
+      });
+      assert.equal(stuMatBlock.status, 403);
+      const teacherMatOk = await request(`/api/classes/${createdClassId}/materials`, {
+        method: 'PUT',
+        token: approvedTeacherToken,
+        body: { assignedLessonIds: [sampleG4Lesson.id], textbookSeries: 'kntt' },
+      });
+      assert.equal(teacherMatOk.status, 200);
+      assert.ok(teacherMatOk.json.class.assignedLessonIds.includes(sampleG4Lesson.id));
+
+      return 'CTGDPT 2018 grade-subject guards, ordering/drag_drop/essay scoring, wrong-question recommendations, favorites/resume, textbook switcher & class materials verified';
+    });
   } finally {
     if (serverProc && serverProc.pid) {
       try {

@@ -43,6 +43,10 @@ import {
   AcademicYear,
   LearningProgress,
   ParentConsentRecord,
+  TEXTBOOK_SERIES_LABELS,
+  TextbookSeries,
+  WrongQuestionStat,
+  Question,
   isLessonVerified
 } from '../src/types/index.ts';
 
@@ -326,6 +330,9 @@ export function createApp() {
   const otpStore = new Map<string, { code: string; expiresAt: number }>();
   const consentOtpStore = new Map<string, { code: string; expiresAt: number }>();
   const studentChatHistories = new Map<string, AiChatMessage[]>();
+  const favoriteLessonsStore = new Map<string, Set<string>>();
+  const lastOpenedLessonStore = new Map<string, { lessonId: string; openedAt: string }>();
+  const wrongQuestionStatsStore = new Map<string, Map<string, WrongQuestionStat>>();
 
   const subjects: CurriculumSubject[] = [...initialSubjects];
   const topics: CurriculumTopic[] = [...initialTopics];
@@ -355,6 +362,8 @@ export function createApp() {
     aiMaxTokensPerDay: 50000,
     curriculumStandard: 'Thông tư 32/2018/TT-BGDĐT & TT 17/2025/TT-BGDĐT',
     curriculumVersionYear: 2026,
+    textbookSeries: 'kntt',
+    textbookSeriesLabel: TEXTBOOK_SERIES_LABELS.kntt,
     maintenanceMode: false,
   };
 
@@ -923,6 +932,7 @@ export function createApp() {
         checkpointPassed: Boolean(checkpointPassed),
         timeSpentSeconds: clampedSeconds,
         completedAt: new Date().toISOString(),
+        lastOpenedAt: new Date().toISOString(),
       };
       learningProgress.unshift(record);
       if (req.authUser!.role === 'student') {
@@ -934,9 +944,55 @@ export function createApp() {
       record.checkpointPassed = record.checkpointPassed || Boolean(checkpointPassed);
       record.timeSpentSeconds += clampedSeconds;
       record.completedAt = new Date().toISOString();
+      record.lastOpenedAt = new Date().toISOString();
     }
 
     res.json({ success: true, progress: record, xpEarned: xpBonus, updatedXp: req.authUser!.xp });
+  });
+
+  // Track recent opened lesson for "Tiếp tục học bài gần nhất" without falsifying completion
+  app.post('/api/learning-progress/open', authenticateRequest, (req: AuthenticatedRequest, res: Response) => {
+    const { lessonId } = req.body;
+    const lesson = lessons.find((l) => l.id === lessonId);
+    if (!lesson) {
+      return res.status(404).json({ error: 'Bài học không tồn tại.' });
+    }
+    const openedAt = new Date().toISOString();
+    lastOpenedLessonStore.set(req.authUser!.id, { lessonId: lesson.id, openedAt });
+    res.json({ success: true, lessonId: lesson.id, openedAt });
+  });
+
+  app.get('/api/learning-progress/last-opened', authenticateRequest, (req: AuthenticatedRequest, res: Response) => {
+    const last = lastOpenedLessonStore.get(req.authUser!.id) || null;
+    res.json(last);
+  });
+
+  // Favorites per student/user
+  app.get('/api/favorites', authenticateRequest, (req: AuthenticatedRequest, res: Response) => {
+    const favSet = favoriteLessonsStore.get(req.authUser!.id) || new Set<string>();
+    res.json({ lessonIds: Array.from(favSet) });
+  });
+
+  app.post('/api/favorites', authenticateRequest, (req: AuthenticatedRequest, res: Response) => {
+    const { lessonId } = req.body;
+    if (!lessonId || !lessons.some((l) => l.id === lessonId)) {
+      return res.status(404).json({ error: 'Bài học không tồn tại.' });
+    }
+    let favSet = favoriteLessonsStore.get(req.authUser!.id);
+    if (!favSet) {
+      favSet = new Set<string>();
+      favoriteLessonsStore.set(req.authUser!.id, favSet);
+    }
+    favSet.add(String(lessonId));
+    res.json({ success: true, lessonIds: Array.from(favSet) });
+  });
+
+  app.delete('/api/favorites/:lessonId', authenticateRequest, (req: AuthenticatedRequest, res: Response) => {
+    const favSet = favoriteLessonsStore.get(req.authUser!.id);
+    if (favSet) {
+      favSet.delete(req.params.lessonId);
+    }
+    res.json({ success: true, lessonIds: Array.from(favSet || []) });
   });
 
   // ----------------- SYSTEM SETTINGS & PRIVACY -----------------
@@ -950,6 +1006,8 @@ export function createApp() {
       parentalConsentRequired: systemSettings.parentalConsentRequired,
       dataRetentionDays: systemSettings.dataRetentionDays,
       curriculumStandard: systemSettings.curriculumStandard,
+      textbookSeries: systemSettings.textbookSeries || 'kntt',
+      textbookSeriesLabel: systemSettings.textbookSeriesLabel || TEXTBOOK_SERIES_LABELS.kntt,
     });
   });
 
@@ -962,6 +1020,8 @@ export function createApp() {
       'aiMaxTokensPerDay',
       'curriculumStandard',
       'curriculumVersionYear',
+      'textbookSeries',
+      'textbookSeriesLabel',
       'maintenanceMode',
     ];
 
@@ -970,6 +1030,11 @@ export function createApp() {
       if (req.body[key] !== undefined) {
         (updates as any)[key] = req.body[key];
       }
+    }
+
+    if (updates.textbookSeries && TEXTBOOK_SERIES_LABELS[updates.textbookSeries as TextbookSeries]) {
+      updates.textbookSeriesLabel =
+        updates.textbookSeriesLabel || TEXTBOOK_SERIES_LABELS[updates.textbookSeries as TextbookSeries];
     }
 
     systemSettings = { ...systemSettings, ...updates };
@@ -1197,23 +1262,30 @@ export function createApp() {
   });
 
   app.get('/api/curriculum/topics', (req: Request, res: Response) => {
-    const { subjectId, grade } = req.query;
+    const { subjectId, grade, semester } = req.query;
     let list = topics;
-    if (subjectId) list = list.filter((t) => t.subjectId === subjectId);
+    if (subjectId && subjectId !== 'all') list = list.filter((t) => t.subjectId === subjectId);
     if (grade) list = list.filter((t) => t.grade === Number(grade));
+    if (semester) list = list.filter((t) => t.semester === Number(semester));
     res.json(list);
   });
 
   app.get('/api/curriculum/lessons', (req: Request, res: Response) => {
-    const { subjectId, grade, status, search } = req.query;
+    const { subjectId, grade, status, search, lessonType, topicId, curriculum } = req.query;
     let list = lessons;
     if (subjectId && subjectId !== 'all') list = list.filter((l) => l.subjectId === subjectId);
     if (grade) list = list.filter((l) => l.grade === Number(grade));
-    if (status) list = list.filter((l) => l.status === status);
+    if (status && status !== 'all') list = list.filter((l) => l.status === status);
+    if (lessonType && lessonType !== 'all') list = list.filter((l) => (l.lessonType || 'lesson') === lessonType);
+    if (topicId && topicId !== 'all') list = list.filter((l) => l.topicId === topicId);
+    if (curriculum && curriculum !== 'all') list = list.filter((l) => (l.curriculum || 'kntt') === curriculum);
     if (search) {
       const q = String(search).toLowerCase().trim();
       list = list.filter(
-        (l) => l.title.toLowerCase().includes(q) || l.lessonCode.toLowerCase().includes(q)
+        (l) =>
+          l.title.toLowerCase().includes(q) ||
+          l.lessonCode.toLowerCase().includes(q) ||
+          l.summary.toLowerCase().includes(q)
       );
     }
     res.json(list);
@@ -1228,7 +1300,23 @@ export function createApp() {
   });
 
   app.post('/api/curriculum/lessons', authenticateRequest, requireRole('admin'), (req: AuthenticatedRequest, res: Response) => {
-    const { title, subjectId, grade, summary, sourceBook, docNumber, coreKnowledge, objectives, status } = req.body;
+    const {
+      title,
+      subjectId,
+      grade,
+      summary,
+      sourceBook,
+      docNumber,
+      coreKnowledge,
+      objectives,
+      status,
+      curriculum,
+      chapter,
+      lessonType,
+      estimatedDuration,
+      workedExamples,
+      subjectModules,
+    } = req.body;
     if (!title || !subjectId || !grade) {
       return res.status(400).json({ error: 'Vui lòng cung cấp tên bài học, môn học và khối lớp.' });
     }
@@ -1242,24 +1330,60 @@ export function createApp() {
       title: String(title).trim(),
       lessonCode: `${String(subjectId).toUpperCase().slice(0, 4)}${grade}-${String(lessons.length + 1).padStart(2, '0')}`,
       order: lessons.length + 1,
-      sourceBook: sourceBook || 'Kết nối tri thức với cuộc sống (Chờ đối chiếu)',
+      curriculum: (curriculum as TextbookSeries) || systemSettings.textbookSeries || 'kntt',
+      chapter: chapter ? String(chapter) : undefined,
+      lessonType: lessonType || 'lesson',
+      estimatedDuration: Number(estimatedDuration) || 15,
+      sourceBook: sourceBook || `${systemSettings.textbookSeriesLabel || 'Kết nối tri thức với cuộc sống'} (Chờ đối chiếu)`,
       objectives: Array.isArray(objectives) && objectives.length ? objectives : ['Hoàn thành mục tiêu bài học theo CTGDPT 2018.'],
       coreKnowledge: Array.isArray(coreKnowledge) && coreKnowledge.length ? coreKnowledge : [summary || title],
       termsAndDefinitions: [],
       illustrations: [],
       commonMisconceptions: [],
+      workedExamples: Array.isArray(workedExamples) ? workedExamples : undefined,
+      subjectModules: subjectModules && typeof subjectModules === 'object' ? subjectModules : undefined,
       summary: String(summary || title),
       officialReference: {
         docNumber: docNumber || 'Chờ đối chiếu văn bản/SGK',
         issueDate: new Date().toISOString().slice(0, 10),
         curriculumVersion: 'GDPT-2018',
       },
+      dataSource: 'teacher_authored',
       status: safeStatus,
     };
     lessons.unshift(newLesson);
     ragEngine.seedFromLessons([newLesson]);
     addAuditLog('Tạo bài học mới', req.authUser!.email, 'admin', `Tạo bài "${newLesson.title}" (${safeStatus}).`, 'info');
     res.status(201).json({ success: true, lesson: newLesson });
+  });
+
+  app.put('/api/curriculum/lessons/:id', authenticateRequest, requireApprovedStaff, (req: AuthenticatedRequest, res: Response) => {
+    const lessonIndex = lessons.findIndex((l) => l.id === req.params.id);
+    if (lessonIndex === -1) {
+      return res.status(404).json({ error: 'Bài học không tồn tại' });
+    }
+    const existing = lessons[lessonIndex];
+    const updatableFields = [
+      'title',
+      'summary',
+      'chapter',
+      'curriculum',
+      'lessonType',
+      'estimatedDuration',
+      'sourceBook',
+      'objectives',
+      'coreKnowledge',
+      'workedExamples',
+      'subjectModules',
+    ] as const;
+    for (const key of updatableFields) {
+      if (req.body[key] !== undefined) {
+        (existing as any)[key] = req.body[key];
+      }
+    }
+    ragEngine.seedFromLessons([existing]);
+    addAuditLog('Cập nhật nội dung bài học', req.authUser!.email, req.authUser!.role, `Chỉnh sửa bài "${existing.title}".`, 'info');
+    res.json({ success: true, lesson: existing });
   });
 
   app.put('/api/curriculum/lessons/:id/status', authenticateRequest, requireRole('admin'), (req: AuthenticatedRequest, res: Response) => {
@@ -1286,12 +1410,56 @@ export function createApp() {
   });
 
   // ----------------- EXERCISES & SUBMISSIONS -----------------
+  function evaluateQuestionDeterministic(q: Question, studentAns: any): boolean {
+    if (q.type === 'single_choice' || q.type === 'scenario') {
+      if (Array.isArray(q.options) && typeof q.correctAnswer === 'number') {
+        return studentAns !== undefined && studentAns !== null && studentAns !== '' && Number(studentAns) === Number(q.correctAnswer);
+      }
+      const cleanStudent = String(studentAns || '').trim().toLowerCase();
+      const cleanCorrect = String(q.correctAnswer || '').trim().toLowerCase();
+      return cleanStudent.length > 0 && cleanStudent === cleanCorrect;
+    }
+    if (q.type === 'multi_choice') {
+      if (Array.isArray(studentAns) && Array.isArray(q.correctAnswer)) {
+        const sSorted = [...studentAns].map(Number).sort((a, b) => a - b);
+        const cSorted = [...q.correctAnswer].map(Number).sort((a, b) => a - b);
+        return sSorted.length === cSorted.length && sSorted.every((v, idx) => v === cSorted[idx]);
+      }
+      return false;
+    }
+    if (q.type === 'true_false') {
+      return typeof studentAns === 'boolean' && studentAns === Boolean(q.correctAnswer);
+    }
+    if (q.type === 'fill_blank' || q.type === 'step_math' || q.type === 'short_answer') {
+      const cleanStudent = String(studentAns || '').trim().toLowerCase().replace(/\s+/g, '');
+      const cleanCorrect = String(q.correctAnswer || '').trim().toLowerCase().replace(/\s+/g, '');
+      return cleanStudent.length > 0 && cleanStudent === cleanCorrect;
+    }
+    if (q.type === 'matching' || q.type === 'drag_drop') {
+      if (typeof studentAns === 'object' && studentAns !== null && typeof q.correctAnswer === 'object' && q.correctAnswer !== null) {
+        const correctMap = q.correctAnswer as Record<string, string>;
+        const keys = Object.keys(correctMap);
+        return keys.length > 0 && keys.every((key) => String(studentAns[key] || '').trim() === String(correctMap[key]).trim());
+      }
+      return false;
+    }
+    if (q.type === 'ordering') {
+      const expected = Array.isArray(q.correctAnswer) ? q.correctAnswer : q.items;
+      if (Array.isArray(studentAns) && Array.isArray(expected) && expected.length > 0) {
+        return studentAns.length === expected.length && expected.every((v, idx) => String(studentAns[idx] || '').trim() === String(v).trim());
+      }
+      return false;
+    }
+    return false;
+  }
+
   app.get('/api/exercises', (req: Request, res: Response) => {
-    const { subjectId, grade, lessonId } = req.query;
+    const { subjectId, grade, lessonId, kind } = req.query;
     let list = exercises;
     if (subjectId && subjectId !== 'all') list = list.filter((e) => e.subjectId === subjectId);
     if (grade) list = list.filter((e) => e.grade === Number(grade));
     if (lessonId) list = list.filter((e) => e.lessonId === lessonId);
+    if (kind && kind !== 'all') list = list.filter((e) => (e.kind || 'practice') === kind);
     res.json(list);
   });
 
@@ -1304,7 +1472,7 @@ export function createApp() {
   });
 
   app.post('/api/exercises', authenticateRequest, requireApprovedStaff, (req: AuthenticatedRequest, res: Response) => {
-    const { title, subjectId, grade, durationMinutes = 15, questions } = req.body;
+    const { title, subjectId, grade, durationMinutes = 15, questions, lessonId, topicId, kind } = req.body;
     if (!title || !Array.isArray(questions) || questions.length === 0) {
       return res.status(400).json({ error: 'Bộ bài tập cần có tiêu đề và ít nhất 1 câu hỏi.' });
     }
@@ -1320,13 +1488,19 @@ export function createApp() {
       })
       .map((q: any, idx: number) => ({
         id: q.id || `q-custom-${Date.now()}-${idx}`,
-        lessonId: q.lessonId || '',
+        lessonId: q.lessonId || lessonId || '',
         subjectId: String(subjectId || 'toan'),
         grade: Number(grade) || 4,
         type: q.type || 'single_choice',
         difficulty: q.difficulty || 'thong_hieu',
+        points: Number(q.points) || 1,
         questionText: String(q.questionText).trim(),
         options: Array.isArray(q.options) ? q.options : undefined,
+        pairs: Array.isArray(q.pairs) ? q.pairs : undefined,
+        items: Array.isArray(q.items) ? q.items : undefined,
+        dragItems: Array.isArray(q.dragItems) ? q.dragItems : undefined,
+        dropZones: Array.isArray(q.dropZones) ? q.dropZones : undefined,
+        rubricCriteria: Array.isArray(q.rubricCriteria) ? q.rubricCriteria : undefined,
         correctAnswer: q.correctAnswer ?? '',
         explanation: q.explanation || 'Giáo viên biên soạn.',
         pedagogicalHint: q.pedagogicalHint || 'Hãy đọc kỹ đề bài trước khi trả lời nhé!',
@@ -1337,6 +1511,9 @@ export function createApp() {
       title: String(title).trim(),
       subjectId: String(subjectId || 'toan'),
       grade: Math.min(5, Math.max(1, Number(grade) || 4)),
+      lessonId: lessonId ? String(lessonId) : undefined,
+      topicId: topicId ? String(topicId) : undefined,
+      kind: kind || 'practice',
       createdBy: req.authUser!.id,
       questions: dedupedQuestions,
       durationMinutes: Math.max(5, Number(durationMinutes) || 15),
@@ -1373,51 +1550,77 @@ export function createApp() {
     }
 
     let totalCorrect = 0;
+    let autoGradedQuestions = 0;
+    let earnedAutoPoints = 0;
+    let totalAutoPoints = 0;
+    let essayCount = 0;
+    const wrongQuestionIds: string[] = [];
     const misconceptionTags: string[] = [];
+
+    let userWrongMap = wrongQuestionStatsStore.get(actualStudentId);
+    if (!userWrongMap) {
+      userWrongMap = new Map<string, WrongQuestionStat>();
+      wrongQuestionStatsStore.set(actualStudentId, userWrongMap);
+    }
 
     exercise.questions.forEach((q) => {
       const studentAns = answers[q.id];
-      let isCorrect = false;
+      const qPoints = Number(q.points) || 1;
 
-      if (q.type === 'single_choice') {
-        isCorrect = studentAns !== undefined && studentAns !== null && Number(studentAns) === Number(q.correctAnswer);
-      } else if (q.type === 'multi_choice') {
-        if (Array.isArray(studentAns) && Array.isArray(q.correctAnswer)) {
-          const sSorted = [...studentAns].map(Number).sort((a, b) => a - b);
-          const cSorted = [...q.correctAnswer].map(Number).sort((a, b) => a - b);
-          isCorrect = sSorted.length === cSorted.length && sSorted.every((v, idx) => v === cSorted[idx]);
-        }
-      } else if (q.type === 'true_false') {
-        isCorrect = typeof studentAns === 'boolean' && studentAns === Boolean(q.correctAnswer);
-      } else if (q.type === 'fill_blank' || q.type === 'step_math' || q.type === 'short_answer') {
-        const cleanStudent = String(studentAns || '').trim().toLowerCase().replace(/\s+/g, '');
-        const cleanCorrect = String(q.correctAnswer || '').trim().toLowerCase().replace(/\s+/g, '');
-        isCorrect = cleanStudent.length > 0 && cleanStudent === cleanCorrect;
-      } else if (q.type === 'essay') {
-        // Essay requires teacher review; mark non-empty response as needing review rather than auto-failing
-        isCorrect = String(studentAns || '').trim().length >= 5;
-      } else if (q.type === 'matching') {
-        if (typeof studentAns === 'object' && studentAns !== null) {
-          const correctMap = q.correctAnswer as Record<string, string>;
-          isCorrect = Object.keys(correctMap).every((key) => studentAns[key] === correctMap[key]);
-        }
+      if (q.type === 'essay') {
+        // Essay questions are NEVER auto-scored arbitrarily; deferred to teacher rubric review
+        essayCount += 1;
+        return;
       }
+
+      autoGradedQuestions += 1;
+      totalAutoPoints += qPoints;
+      const isCorrect = evaluateQuestionDeterministic(q, studentAns);
+
+      const statKey = `${exercise.id}:${q.id}`;
+      const existingStat = userWrongMap!.get(statKey);
+      const linkedLesson = lessons.find((l) => l.id === (q.lessonId || exercise.lessonId));
 
       if (isCorrect) {
         totalCorrect += 1;
+        earnedAutoPoints += qPoints;
+        if (existingStat) {
+          existingStat.attemptCount += 1;
+        }
       } else {
+        wrongQuestionIds.push(q.id);
         misconceptionTags.push(
           q.difficulty === 'van_dung' || q.difficulty === 'van_dung_cao'
             ? `Vận dụng quy tắc: ${q.pedagogicalHint}`
             : `Khái niệm cơ bản: ${q.pedagogicalHint}`
         );
+        userWrongMap!.set(statKey, {
+          questionId: q.id,
+          exerciseSetId: exercise.id,
+          exerciseTitle: exercise.title,
+          lessonId: q.lessonId || exercise.lessonId || '',
+          lessonTitle: linkedLesson?.title,
+          subjectId: q.subjectId || exercise.subjectId,
+          grade: q.grade || exercise.grade,
+          questionText: q.questionText,
+          wrongCount: (existingStat?.wrongCount || 0) + 1,
+          attemptCount: (existingStat?.attemptCount || 0) + 1,
+          lastWrongAt: new Date().toISOString(),
+        });
       }
     });
 
     const totalQuestions = exercise.questions.length;
-    const score = totalQuestions > 0 ? Number(((totalCorrect / totalQuestions) * 10).toFixed(1)) : 10;
-    // Server-computed XP strictly derived from verified answer correctness
-    const xpEarned = totalCorrect * 20 + 30;
+    const hasEssay = essayCount > 0;
+    const score =
+      autoGradedQuestions > 0 && totalAutoPoints > 0
+        ? Number(((earnedAutoPoints / totalAutoPoints) * 10).toFixed(1))
+        : hasEssay
+        ? 0
+        : 10;
+
+    // Server-computed XP strictly derived from verified deterministic correctness
+    const xpEarned = totalCorrect * 20 + (autoGradedQuestions > 0 ? 20 : 15);
 
     const student = users.find((u) => u.id === actualStudentId);
     if (student) {
@@ -1438,18 +1641,23 @@ export function createApp() {
       }
     }
 
-    const hasEssay = exercise.questions.some((q) => q.type === 'essay');
+    const priorAttempts = submissions.filter(
+      (s) => s.studentId === actualStudentId && s.exerciseSetId === exerciseSetId
+    ).length;
+
     let feedback = 'Làm bài rất tốt!';
-    if (hasEssay) {
-      feedback = `Đã ghi nhận bài làm (${score}/10 điểm tự động). Phần tự luận đang chờ thầy/cô giáo nhận xét thêm.`;
+    if (hasEssay && autoGradedQuestions === 0) {
+      feedback = 'Đã nộp bài tự luận thành công. Thầy/cô giáo sẽ chấm theo tiêu chí đánh giá và phản hồi cho em.';
+    } else if (hasEssay) {
+      feedback = `Đã chấm ${totalCorrect}/${autoGradedQuestions} câu trắc nghiệm/tương tác (${score}/10). Phần tự luận đang chờ thầy/cô giáo chấm theo tiêu chí.`;
     } else if (score === 10) {
-      feedback = 'Tuyệt đối 10/10! Bạn là một bậc thầy nhỏ tuổi, Robot EduBot rất tự hào về bạn! 🌟';
+      feedback = 'Tuyệt đối 10/10! Em đã nắm rất vững kiến thức bài học này.';
     } else if (score >= 8) {
-      feedback = `Khá xuất sắc (${score}/10)! Em đã nắm vững phần lớn kiến thức, hãy xem lại các lỗi nhỏ nhé!`;
+      feedback = `Khá xuất sắc (${score}/10)! Em hãy xem lại giải thích các câu còn nhầm nhé.`;
     } else if (score >= 5) {
-      feedback = `Cố gắng lắm (${score}/10)! Cùng EduBot ôn tập lại các khái niệm chưa hiểu nhé!`;
+      feedback = `Cố gắng lắm (${score}/10)! Hãy ôn lại phần bài giảng gợi ý bên dưới rồi làm lại nhé.`;
     } else {
-      feedback = `Không sao cả (${score}/10), EduBot sẵn sàng cùng em luyện tập lại từng bước một.`;
+      feedback = `Không sao cả (${score}/10), hãy đọc lại bài giảng gợi ý và thử làm lại từng bước một.`;
     }
 
     const submission: StudentSubmission = {
@@ -1463,6 +1671,10 @@ export function createApp() {
       score,
       totalCorrect,
       totalQuestions,
+      autoGradedQuestions,
+      pendingEssayReview: hasEssay,
+      wrongQuestionIds,
+      attemptNumber: priorAttempts + 1,
       completedAt: new Date().toISOString(),
       timeSpentSeconds: Math.min(7200, Math.max(5, Number(timeSpentSeconds) || 60)),
       feedback,
@@ -1471,15 +1683,34 @@ export function createApp() {
     };
 
     submissions.unshift(submission);
+    const recommendedLessonIds = Array.from(
+      new Set(
+        exercise.questions
+          .filter((q) => wrongQuestionIds.includes(q.id))
+          .map((q) => q.lessonId || exercise.lessonId || '')
+          .filter(Boolean)
+      )
+    );
+    const recommendedReviewLessons = recommendedLessonIds
+      .map((lid) => lessons.find((l) => l.id === lid))
+      .filter((l): l is Lesson => Boolean(l))
+      .map((l) => ({ id: l.id, title: l.title, subjectId: l.subjectId, grade: l.grade }));
+
     addAuditLog(
       'Nộp bài tập',
       req.authUser!.email,
       req.authUser!.role,
-      `Hoàn thành bài tập "${exercise.title}" - Điểm: ${score}/10, nhận +${xpEarned} XP.`,
+      `Hoàn thành bài tập "${exercise.title}" (Lần ${submission.attemptNumber}) - Điểm tự động: ${score}/10, nhận +${xpEarned} XP.`,
       'success'
     );
 
-    res.json({ success: true, submission, xpEarned, updatedXp: student?.xp });
+    res.json({
+      success: true,
+      submission,
+      xpEarned,
+      updatedXp: student?.xp,
+      recommendedReviewLessons,
+    });
   });
 
   app.put('/api/submissions/:id/grade', authenticateRequest, requireApprovedStaff, (req: AuthenticatedRequest, res: Response) => {
@@ -1608,6 +1839,34 @@ export function createApp() {
     res.json({ success: true, class: targetClass });
   });
 
+  app.put('/api/classes/:id/materials', authenticateRequest, requireApprovedStaff, (req: AuthenticatedRequest, res: Response) => {
+    const targetClass = classes.find((c) => c.id === req.params.id);
+    if (!targetClass) {
+      return res.status(404).json({ error: 'Không tìm thấy lớp học.' });
+    }
+    if (req.authUser!.role === 'teacher' && targetClass.teacherId !== req.authUser!.id) {
+      return res.status(403).json({ error: 'Bạn chỉ được quản lý học liệu của lớp mình phụ trách.' });
+    }
+    const { assignedLessonIds, textbookSeries } = req.body;
+    if (Array.isArray(assignedLessonIds)) {
+      const validLessonIds = assignedLessonIds
+        .map(String)
+        .filter((lid) => lessons.some((l) => l.id === lid));
+      targetClass.assignedLessonIds = Array.from(new Set(validLessonIds));
+    }
+    if (textbookSeries && TEXTBOOK_SERIES_LABELS[textbookSeries as TextbookSeries]) {
+      targetClass.textbookSeries = textbookSeries as TextbookSeries;
+    }
+    addAuditLog(
+      'Cập nhật học liệu lớp học',
+      req.authUser!.email,
+      req.authUser!.role,
+      `Gán ${targetClass.assignedLessonIds?.length || 0} bài học cho lớp ${targetClass.name}.`,
+      'info'
+    );
+    res.json({ success: true, class: targetClass });
+  });
+
   app.get('/api/assignments', authenticateRequest, (req: AuthenticatedRequest, res: Response) => {
     const { classId, grade } = req.query;
     let list = assignments;
@@ -1683,6 +1942,57 @@ export function createApp() {
     res.json(list);
   });
 
+  // Wrong-question analytics & recommended review lessons (role-scoped)
+  app.get('/api/analytics/wrong-questions', authenticateRequest, (req: AuthenticatedRequest, res: Response) => {
+    const aggregated = new Map<string, WrongQuestionStat>();
+    const allowedStudentIds = new Set<string>();
+
+    if (req.authUser!.role === 'student') {
+      allowedStudentIds.add(req.authUser!.id);
+    } else if (req.authUser!.role === 'teacher') {
+      classes
+        .filter((c) => c.teacherId === req.authUser!.id)
+        .forEach((c) => c.students.forEach((s) => allowedStudentIds.add(s.id)));
+    } else if (req.authUser!.role === 'admin') {
+      wrongQuestionStatsStore.forEach((_val, sid) => allowedStudentIds.add(sid));
+    }
+
+    for (const sid of allowedStudentIds) {
+      const m = wrongQuestionStatsStore.get(sid);
+      if (!m) continue;
+      for (const [k, stat] of m.entries()) {
+        const cur = aggregated.get(k);
+        if (!cur) {
+          aggregated.set(k, { ...stat });
+        } else {
+          cur.wrongCount += stat.wrongCount;
+          cur.attemptCount += stat.attemptCount;
+          if (stat.lastWrongAt > cur.lastWrongAt) cur.lastWrongAt = stat.lastWrongAt;
+        }
+      }
+    }
+
+    const wrongQuestions = Array.from(aggregated.values())
+      .sort((a, b) => b.wrongCount - a.wrongCount)
+      .slice(0, 12);
+
+    const recommendedLessonIds = Array.from(
+      new Set(wrongQuestions.map((w) => w.lessonId).filter(Boolean))
+    );
+    const recommendedLessons = recommendedLessonIds
+      .map((lid) => lessons.find((l) => l.id === lid))
+      .filter((l): l is Lesson => Boolean(l))
+      .map((l) => ({
+        id: l.id,
+        title: l.title,
+        subjectId: l.subjectId,
+        grade: l.grade,
+        estimatedDuration: l.estimatedDuration || 15,
+      }));
+
+    res.json({ wrongQuestions, recommendedLessons });
+  });
+
   // ----------------- AI DRAFTS & CONTENT REVIEW (WITH VERSION HISTORY) -----------------
   app.get('/api/ai/drafts', authenticateRequest, requireApprovedStaff, (req: AuthenticatedRequest, res: Response) => {
     if (req.authUser!.role === 'admin') return res.json(aiDrafts);
@@ -1727,6 +2037,88 @@ export function createApp() {
       status === 'rejected' ? 'warning' : 'success'
     );
     res.json({ success: true, draft });
+  });
+
+  app.post('/api/ai/drafts/:id/publish-to-curriculum', authenticateRequest, requireApprovedStaff, (req: AuthenticatedRequest, res: Response) => {
+    const draft = aiDrafts.find((d) => d.id === req.params.id);
+    if (!draft) {
+      return res.status(404).json({ error: 'Bản nháp không tồn tại' });
+    }
+    const rawText =
+      typeof draft.content?.text === 'string'
+        ? draft.content.text
+        : typeof draft.content?.analysis === 'string'
+        ? draft.content.analysis
+        : JSON.stringify(draft.content || {});
+
+    const publishedStatus = req.authUser!.role === 'admin' ? 'verified' : 'NEEDS_REVIEW';
+    const newLesson: Lesson = {
+      id: `lesson-ai-${Date.now()}`,
+      topicId: `topic-${draft.subjectId}-g${draft.grade}-1`,
+      subjectId: draft.subjectId || 'toan',
+      grade: Math.min(5, Math.max(1, Number(draft.grade) || 4)),
+      semester: 1,
+      title: draft.title.replace(/^Kế hoạch bài dạy:\s*/i, '').trim(),
+      lessonCode: `${String(draft.subjectId || 'TOAN').toUpperCase().slice(0, 4)}${draft.grade}-GV-${String(lessons.length + 1).padStart(2, '0')}`,
+      order: lessons.length + 1,
+      curriculum: systemSettings.textbookSeries || 'kntt',
+      lessonType: draft.type === 'quiz_matrix' ? 'review' : 'lesson',
+      estimatedDuration: 18,
+      sourceBook: `Biên soạn bởi ${req.authUser!.name} (${systemSettings.textbookSeriesLabel || 'Kết nối tri thức với cuộc sống'})`,
+      objectives: [
+        draft.content?.objectives
+          ? String(draft.content.objectives)
+          : `Nắm vững nội dung trọng tâm của bài "${draft.title}".`,
+      ],
+      coreKnowledge: String(rawText)
+        .split('\n')
+        .map((s: string) => s.trim())
+        .filter((s: string) => s.length > 12)
+        .slice(0, 5),
+      termsAndDefinitions: [],
+      illustrations: [],
+      commonMisconceptions: [],
+      summary: rawText.slice(0, 220) + (rawText.length > 220 ? '...' : ''),
+      officialReference: {
+        docNumber: 'Học liệu giáo viên kiểm duyệt',
+        issueDate: new Date().toISOString().slice(0, 10),
+        curriculumVersion: 'CTGDPT-2018',
+      },
+      dataSource: 'ai_generated',
+      sourceVerificationNote: `Chuyển từ bản nháp giáo viên ${req.authUser!.name} kiểm duyệt (${publishedStatus}).`,
+      status: publishedStatus,
+      interactiveContent: {
+        sections: [
+          {
+            title: 'Nội dung học tập do Giáo viên kiểm duyệt',
+            content: rawText.slice(0, 2000),
+          },
+        ],
+      },
+    };
+
+    lessons.unshift(newLesson);
+    ragEngine.seedFromLessons([newLesson]);
+    draft.status = 'published';
+    draft.reviewHistory = [
+      {
+        version: (draft.reviewHistory?.length || 0) + 1,
+        status: 'published',
+        reviewer: req.authUser!.name,
+        notes: `Xuất bản thành bài học mã ${newLesson.lessonCode}`,
+        reviewedAt: new Date().toISOString(),
+      },
+      ...(draft.reviewHistory || []),
+    ];
+
+    addAuditLog(
+      'Xuất bản học liệu từ bản nháp AI',
+      req.authUser!.email,
+      req.authUser!.role,
+      `Đã đưa "${newLesson.title}" vào kho học liệu (${publishedStatus}).`,
+      'success'
+    );
+    res.status(201).json({ success: true, draft, lesson: newLesson });
   });
 
   // ----------------- RAG DOCUMENT INGESTION & RETRIEVAL API -----------------
@@ -1891,22 +2283,41 @@ export function createApp() {
       topK: 4,
     });
 
+    const currentLesson = currentLessonId ? lessons.find((l) => l.id === currentLessonId) : undefined;
+    const gradeSubjects = subjects
+      .filter((s) => s.grades.includes(Number(grade)))
+      .map((s) => s.name)
+      .join(', ');
+    const recentWrongMap = wrongQuestionStatsStore.get(req.authUser!.id);
+    const weakTopics = recentWrongMap
+      ? Array.from(recentWrongMap.values())
+          .sort((a, b) => b.wrongCount - a.wrongCount)
+          .slice(0, 3)
+          .map((w) => w.questionText.slice(0, 80))
+      : [];
+
     const safetyRule = systemSettings.childSafetyFilterEnabled
       ? `4. BẢO MẬT & AN TOÀN TRẺ EM (BẮT BUỘC):
    - Nghiêm cấm hỏi thông tin cá nhân nhạy cảm (họ tên phụ huynh, SĐT, địa chỉ, mật khẩu).
    - Từ chối lịch sự mọi chủ đề bạo lực, nguy hại hoặc không phù hợp trẻ em.`
       : '';
 
-    const systemInstruction = `Bạn là EduBot - Mascot Robot 3D gia sư thông minh, ấm áp dành cho học sinh tiểu học Việt Nam (Lớp 1–5).
+    const systemInstruction = `Bạn là EduBot - Mascot Robot gia sư thân thiện dành cho học sinh tiểu học Việt Nam (Lớp ${grade}).
+THÔNG TIN HỌC TẬP HIỆN TẠI:
+- Khối lớp: Lớp ${grade} (Các môn thuộc chương trình: ${gradeSubjects})
+- Bộ sách định hướng hiện tại: ${systemSettings.textbookSeriesLabel || TEXTBOOK_SERIES_LABELS.kntt}
+${currentLesson ? `- Bài học đang mở: "${currentLesson.title}". Kiến thức trọng tâm: ${currentLesson.coreKnowledge.join(' | ')}` : ''}
+${weakTopics.length > 0 ? `- Lưu ý các câu hỏi học sinh vừa làm sai gần đây: ${weakTopics.join(' ; ')}` : ''}
+
 QUY TẮC SƯ PHẠM BẮT BUỘC:
-1. Xưng hô: "EduBot" / "tớ" và gọi học sinh là "bạn nhỏ" thân mật (dùng emoji 🤖, ⭐, ⚡ vừa phải).
+1. Xưng hô: "EduBot" / "tớ" và gọi học sinh là "bạn nhỏ" thân mật (dùng từ ngữ ngắn gọn, dễ hiểu đúng độ tuổi Lớp ${grade}).
 2. PHƯƠNG PHÁP SOCRATIC GỢI MỞ: Khi học sinh hỏi bài tập, KHÔNG đưa ngay đáp số cuối! Hãy:
    - Khen ngợi tinh thần ham học.
-   - Đưa 1 ví dụ đời sống quen thuộc (chiếc bánh, cái kẹo, robot).
+   - Đưa 1 ví dụ đời sống quen thuộc (chiếc bánh, cái kẹo, quyển vở).
    - Đặt 1 câu hỏi gợi ý nhỏ để bé tự suy nghĩ bước tiếp theo.
-3. TRUNG THỰC TÀI LIỆU: Chỉ bám sát các nguồn RAG đã kiểm chứng dưới đây. Tuyệt đối KHÔNG tự bịa tên sách giáo khoa, số trang hoặc trích dẫn giả. Nếu tài liệu RAG ghi "KHÔNG TÌM THẤY TÀI LIỆU PHÙ HỢP", hãy nói rõ giới hạn kiến thức hiện tại và khuyên bạn nhỏ hỏi thêm thầy cô giáo.
+3. TRUNG THỰC TÀI LIỆU: Chỉ bám sát các nguồn kiến thức bài học bên dưới. Tuyệt đối KHÔNG tự bịa tên sách, số trang hoặc trích dẫn giả. Nếu tài liệu bên dưới ghi "KHÔNG TÌM THẤY TÀI LIỆU PHÙ HỢP", hãy nói rõ đây là giải thích tổng quát của trợ lý và khuyên bạn nhỏ hỏi thêm thầy cô giáo.
 ${safetyRule}
-5. NGỮ CẢNH RAG ĐÃ TRÍCH XUẤT:
+5. CĂN CỨ KIẾN THỨC BÀI HỌC:
 ${retrieval.contextText}`;
 
     const priorHistory = studentChatHistories.get(req.authUser!.id) || [];

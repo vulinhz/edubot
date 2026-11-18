@@ -17,6 +17,12 @@ import {
   KnowledgeNode,
   AcademicYear
 } from '../src/types/index.ts';
+import {
+  fullCurriculumSubjects,
+  extendedTopics,
+  extendedLessons,
+  extendedExercises,
+} from './curriculumData.ts';
 
 export const initialUsers: User[] = [
   {
@@ -103,98 +109,7 @@ export const initialUsers: User[] = [
   }
 ];
 
-export const initialSubjects: CurriculumSubject[] = [
-  {
-    id: 'toan',
-    name: 'Toán',
-    code: 'MATH',
-    grades: [1, 2, 3, 4, 5],
-    category: 'compulsory',
-    icon: 'Calculator',
-    color: '#0284c7', // Sky Blue
-    description: 'Số và phép tính, Hình học và Đo lường, Một số yếu tố Thống kê và Xác suất.',
-  },
-  {
-    id: 'tieng-viet',
-    name: 'Tiếng Việt',
-    code: 'VIET',
-    grades: [1, 2, 3, 4, 5],
-    category: 'compulsory',
-    icon: 'BookOpen',
-    color: '#059669', // Emerald
-    description: 'Đọc đúng, đọc hiểu, viết câu đoạn, luyện từ và câu, kể chuyện và giao tiếp.',
-  },
-  {
-    id: 'tu-nhien-xa-hoi',
-    name: 'Tự nhiên và Xã hội',
-    code: 'TNXH',
-    grades: [1, 2, 3],
-    category: 'compulsory',
-    icon: 'Compass',
-    color: '#d97706', // Amber
-    description: 'Gia đình, Trường học, Cộng đồng địa phương, Thực vật và Động vật, Trái Đất và Bầu trời.',
-  },
-  {
-    id: 'khoa-hoc',
-    name: 'Khoa học',
-    code: 'SCI',
-    grades: [4, 5],
-    category: 'compulsory',
-    icon: 'Atom',
-    color: '#7c3aed', // Purple
-    description: 'Chất, Năng lượng, Thực vật và Động vật, Nấm vi khuẩn, Con người và Sức khỏe, Sinh vật và Môi trường.',
-  },
-  {
-    id: 'lich-su-dia-li',
-    name: 'Lịch sử và Địa lí',
-    code: 'HGI',
-    grades: [4, 5],
-    category: 'compulsory',
-    icon: 'Globe',
-    color: '#dc2626', // Rose
-    description: 'Địa phương em, Các vùng miền đất nước, Đất nước và con người Việt Nam qua các thời kỳ.',
-  },
-  {
-    id: 'tin-hoc',
-    name: 'Tin học',
-    code: 'INF',
-    grades: [3, 4, 5],
-    category: 'compulsory',
-    icon: 'Cpu',
-    color: '#06b6d4', // Cyan
-    description: 'Máy tính và em, Mạng Internet an toàn, Thuật toán và Lập trình trực quan Scratch.',
-  },
-  {
-    id: 'tieng-anh',
-    name: 'Tiếng Anh (Ngoại ngữ 1)',
-    code: 'ENG',
-    grades: [1, 2, 3, 4, 5],
-    category: 'compulsory',
-    icon: 'Languages',
-    color: '#4f46e5', // Indigo
-    description: 'Phát âm chuẩn quốc tế, từ vựng theo chủ điểm trường học, phản xạ giao tiếp tự nhiên.',
-  },
-  {
-    id: 'dao-duc',
-    name: 'Đạo đức',
-    code: 'ETH',
-    grades: [1, 2, 3, 4, 5],
-    category: 'compulsory',
-    icon: 'HeartHandshake',
-    color: '#ea580c', // Orange
-    description: 'Giáo dục hành vi văn minh, lòng biết ơn cha mẹ thầy cô, an toàn giao thông và kỹ năng sống.',
-  },
-  {
-    id: 'cong-nghe',
-    name: 'Công nghệ',
-    code: 'TECH',
-    grades: [3, 4, 5],
-    category: 'compulsory',
-    icon: 'Wrench',
-    color: '#0d9488',
-    description: 'Công nghệ và đời sống, thủ công kỹ thuật, mô hình lắp ghép và an toàn thiết bị gia đình.',
-  }
-];
+export const initialSubjects: CurriculumSubject[] = fullCurriculumSubjects;
 
 export const initialTopics: CurriculumTopic[] = [
   // Grade 1
@@ -219,7 +134,8 @@ export const initialTopics: CurriculumTopic[] = [
   // Grade 5
   { id: 'topic-math-g5-1', subjectId: 'toan', grade: 5, semester: 1, title: 'Số thập phân và các phép tính', order: 1, lessonCount: 4 },
   { id: 'topic-viet-g5-1', subjectId: 'tieng-viet', grade: 5, semester: 1, title: 'Từ đồng nghĩa, từ trái nghĩa và liên kết câu', order: 1, lessonCount: 4 },
-  { id: 'topic-sci-g5-1', subjectId: 'khoa-hoc', grade: 5, semester: 1, title: 'Sự sinh sản và phát triển của thực vật, động vật', order: 1, lessonCount: 3 }
+  { id: 'topic-sci-g5-1', subjectId: 'khoa-hoc', grade: 5, semester: 1, title: 'Sự sinh sản và phát triển của thực vật, động vật', order: 1, lessonCount: 3 },
+  ...extendedTopics
 ];
 
 export const initialLessons: Lesson[] = [
@@ -233,6 +149,13 @@ export const initialLessons: Lesson[] = [
     title: 'Các số từ 1 đến 10 và so sánh số',
     lessonCode: 'TOAN1-CH1-B01',
     order: 1,
+    curriculum: 'kntt',
+    chapter: 'Chương 1: Các số từ 0 đến 10',
+    lessonType: 'lesson',
+    estimatedDuration: 15,
+    difficulty: 'co_ban',
+    visualDiagramKey: 'clock_numberline',
+    visualDiagramCaption: 'Tia số tăng dần từ 0 đến 10 giúp bé so sánh số lớn hơn và bé hơn',
     objectives: [
       'Đếm, đọc, viết được các số từ 1 đến 10.',
       'Nhận biết số lượng các vật trong nhóm và gắn tương ứng với chữ số.',
@@ -383,6 +306,25 @@ export const initialLessons: Lesson[] = [
     title: 'Khái niệm phân số và phân số bằng nhau',
     lessonCode: 'TOAN4-CH2-B01',
     order: 1,
+    curriculum: 'kntt',
+    chapter: 'Chương 2: Phân số',
+    lessonType: 'lesson',
+    estimatedDuration: 18,
+    difficulty: 'trung_binh',
+    visualDiagramKey: 'fraction_model',
+    visualDiagramCaption: 'Mô hình trực quan biểu diễn phân số 3/4 và phân số bằng nhau 1/2 = 2/4',
+    workedExamples: [
+      {
+        title: 'Rút gọn phân số về tối giản',
+        problem: 'Rút gọn phân số 12/18 về phân số tối giản',
+        steps: [
+          'Bước 1: Tìm số tự nhiên lớn hơn 1 mà cả 12 và 18 cùng chia hết (số 6).',
+          'Bước 2: Chia cả tử số và mẫu số cho 6: (12 : 6) / (18 : 6) = 2/3.',
+          'Bước 3: Kiểm tra 2 và 3 không cùng chia hết cho số nào lớn hơn 1 nên 2/3 là tối giản.',
+        ],
+        answer: '12/18 = 2/3',
+      },
+    ],
     objectives: [
       'Nhận biết được phân số gồm có tử số và mẫu số (với mẫu số khác 0).',
       'Hiểu ý nghĩa của phân số: tử số chỉ số phần bằng nhau được lấy, mẫu số chỉ tổng số phần bằng nhau chia ra.',
@@ -450,6 +392,13 @@ export const initialLessons: Lesson[] = [
     title: 'Nước có những tính chất gì? Vòng tuần hoàn của nước',
     lessonCode: 'KHOAHOC4-CH1-B01',
     order: 1,
+    curriculum: 'kntt',
+    chapter: 'Chủ đề Chất và Năng lượng',
+    lessonType: 'lesson',
+    estimatedDuration: 18,
+    difficulty: 'co_ban',
+    visualDiagramKey: 'water_cycle',
+    visualDiagramCaption: 'Sơ đồ vòng tuần hoàn của nước: Bay hơi → Ngưng tụ tạo mây → Mưa rơi',
     objectives: [
       'Nêu được một số tính chất của nước: chất lỏng trong suốt, không màu, không mùi, không vị, không có hình dạng nhất định.',
       'Trình bày được ba thể của nước: thể lỏng, thể khí (hơi) và thể rắn (băng/đá).',
@@ -1748,3 +1697,14 @@ initialLessons.push(
   }
 );
 
+for (const les of extendedLessons) {
+  if (!initialLessons.some((existing) => existing.id === les.id)) {
+    initialLessons.push(les);
+  }
+}
+
+for (const ex of extendedExercises) {
+  if (!initialExercises.some((existing) => existing.id === ex.id)) {
+    initialExercises.push(ex);
+  }
+}

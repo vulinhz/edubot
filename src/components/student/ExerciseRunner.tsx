@@ -17,63 +17,127 @@ import {
   ChevronRight,
   RotateCcw,
   AlertCircle,
-  Lock
+  Lock,
+  ArrowUp,
+  ArrowDown,
+  Clock,
+  BookOpen,
 } from 'lucide-react';
+
+interface RecommendedLessonRef {
+  id: string;
+  title: string;
+  subjectId: string;
+  grade: number;
+}
 
 interface ExerciseRunnerProps {
   exercise: ExerciseSet;
   assignmentId?: string;
   existingGradedSubmission?: StudentSubmission | null;
+  previousAttempts?: StudentSubmission[];
   studentId: string;
   studentName: string;
   grade: number;
   authToken?: string | null;
   onRequireAuth?: () => void;
   onBack: () => void;
+  onOpenLesson?: (lessonId: string) => void;
   onSubmittedSuccess: (submission: StudentSubmission, xpEarned: number) => void;
 }
 
-function evaluateQuestionCorrectness(q: Question, studentAns: any): boolean {
-  if (q.type === 'single_choice') {
-    return studentAns !== undefined && studentAns !== null && Number(studentAns) === Number(q.correctAnswer);
+function getInitialOrderList(items: string[]): string[] {
+  if (items.length <= 1) return [...items];
+  // Rotate/reverse deterministically so it is not pre-solved
+  const reversed = [...items].reverse();
+  if (reversed.every((v, idx) => v === items[idx])) {
+    return [...items.slice(1), items[0]];
+  }
+  return reversed;
+}
+
+function evaluateQuestionStatus(
+  q: Question,
+  studentAns: any
+): 'correct' | 'incorrect' | 'pending_review' {
+  if (q.type === 'essay') {
+    return 'pending_review';
+  }
+  if (q.type === 'single_choice' || q.type === 'scenario') {
+    if (Array.isArray(q.options) && typeof q.correctAnswer === 'number') {
+      return studentAns !== undefined &&
+        studentAns !== null &&
+        studentAns !== '' &&
+        Number(studentAns) === Number(q.correctAnswer)
+        ? 'correct'
+        : 'incorrect';
+    }
+    const cleanStudent = String(studentAns || '').trim().toLowerCase();
+    const cleanCorrect = String(q.correctAnswer || '').trim().toLowerCase();
+    return cleanStudent.length > 0 && cleanStudent === cleanCorrect ? 'correct' : 'incorrect';
   }
   if (q.type === 'multi_choice') {
-    if (!Array.isArray(studentAns) || !Array.isArray(q.correctAnswer)) return false;
+    if (!Array.isArray(studentAns) || !Array.isArray(q.correctAnswer)) return 'incorrect';
     const sSorted = [...studentAns].map(Number).sort((a, b) => a - b);
     const cSorted = [...q.correctAnswer].map(Number).sort((a, b) => a - b);
-    return sSorted.length === cSorted.length && sSorted.every((v, i) => v === cSorted[i]);
+    return sSorted.length === cSorted.length && sSorted.every((v, i) => v === cSorted[i])
+      ? 'correct'
+      : 'incorrect';
   }
   if (q.type === 'true_false') {
-    return typeof studentAns === 'boolean' && studentAns === Boolean(q.correctAnswer);
+    return typeof studentAns === 'boolean' && studentAns === Boolean(q.correctAnswer)
+      ? 'correct'
+      : 'incorrect';
   }
   if (q.type === 'fill_blank' || q.type === 'step_math' || q.type === 'short_answer') {
     const cleanStudent = String(studentAns || '').trim().toLowerCase().replace(/\s+/g, '');
     const cleanCorrect = String(q.correctAnswer || '').trim().toLowerCase().replace(/\s+/g, '');
-    return cleanStudent.length > 0 && cleanStudent === cleanCorrect;
+    return cleanStudent.length > 0 && cleanStudent === cleanCorrect ? 'correct' : 'incorrect';
   }
-  if (q.type === 'essay') {
-    return String(studentAns || '').trim().length >= 5;
-  }
-  if (q.type === 'matching') {
-    if (typeof studentAns !== 'object' || studentAns === null) return false;
+  if (q.type === 'matching' || q.type === 'drag_drop') {
+    if (typeof studentAns !== 'object' || studentAns === null || typeof q.correctAnswer !== 'object' || !q.correctAnswer) {
+      return 'incorrect';
+    }
     const correctMap = q.correctAnswer as Record<string, string>;
-    return Object.keys(correctMap).every((k) => studentAns[k] === correctMap[k]);
+    const keys = Object.keys(correctMap);
+    return keys.length > 0 &&
+      keys.every((k) => String(studentAns[k] || '').trim() === String(correctMap[k]).trim())
+      ? 'correct'
+      : 'incorrect';
   }
-  return false;
+  if (q.type === 'ordering') {
+    const expected = Array.isArray(q.correctAnswer) ? q.correctAnswer : q.items;
+    if (!Array.isArray(studentAns) || !Array.isArray(expected) || expected.length === 0) {
+      return 'incorrect';
+    }
+    return studentAns.length === expected.length &&
+      expected.every((v, i) => String(studentAns[i] || '').trim() === String(v).trim())
+      ? 'correct'
+      : 'incorrect';
+  }
+  return 'incorrect';
 }
 
 function formatStudentAnswer(q: Question, studentAns: any): string {
   if (studentAns === undefined || studentAns === null || studentAns === '') {
     return 'Chưa trả lời';
   }
-  if (q.type === 'single_choice' && q.options) {
+  if ((q.type === 'single_choice' || q.type === 'scenario') && q.options && typeof studentAns === 'number') {
     return q.options[Number(studentAns)] || 'Chưa trả lời';
   }
   if (q.type === 'multi_choice' && q.options && Array.isArray(studentAns)) {
     return studentAns.map((idx) => q.options?.[Number(idx)]).filter(Boolean).join(', ') || 'Chưa chọn';
   }
   if (q.type === 'true_false') {
-    return studentAns ? 'ĐÚNG' : 'SAI';
+    return studentAns ? 'Đúng' : 'Sai';
+  }
+  if (q.type === 'ordering' && Array.isArray(studentAns)) {
+    return studentAns.join(' → ');
+  }
+  if (q.type === 'drag_drop' && typeof studentAns === 'object' && q.dragItems) {
+    return q.dragItems
+      .map((item) => `${item.label} → ${studentAns[item.id] || '?'}`)
+      .join('; ');
   }
   if (q.type === 'matching' && typeof studentAns === 'object') {
     return Object.entries(studentAns).map(([k, v]) => `${k} → ${v || '?'}`).join('; ');
@@ -81,16 +145,39 @@ function formatStudentAnswer(q: Question, studentAns: any): string {
   return String(studentAns);
 }
 
+const QUESTION_TYPE_LABELS: Record<string, string> = {
+  single_choice: 'Trắc nghiệm một đáp án',
+  multi_choice: 'Trắc nghiệm nhiều đáp án',
+  true_false: 'Đúng / Sai',
+  fill_blank: 'Điền từ / số',
+  matching: 'Nối cặp',
+  ordering: 'Sắp xếp thứ tự',
+  drag_drop: 'Kéo thả phân loại',
+  step_math: 'Giải toán từng bước',
+  short_answer: 'Trả lời ngắn',
+  scenario: 'Bài tập tình huống',
+  essay: 'Tự luận (Giáo viên chấm)',
+};
+
+const DIFFICULTY_LABELS: Record<string, string> = {
+  nhan_biet: 'Nhận biết',
+  thong_hieu: 'Thông hiểu',
+  van_dung: 'Vận dụng',
+  van_dung_cao: 'Vận dụng cao',
+};
+
 export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
   exercise,
   assignmentId,
   existingGradedSubmission,
+  previousAttempts = [],
   studentId,
   studentName,
   grade,
   authToken,
   onRequireAuth,
   onBack,
+  onOpenLesson,
   onSubmittedSuccess,
 }) => {
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -99,9 +186,11 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
   const [secondsSpent, setSecondsSpent] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [selectedDragItemId, setSelectedDragItemId] = useState<string | null>(null);
   const [submissionResult, setSubmissionResult] = useState<{
     submission: StudentSubmission;
     xpEarned: number;
+    recommendedReviewLessons: RecommendedLessonRef[];
   } | null>(null);
 
   useEffect(() => {
@@ -110,10 +199,21 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
     setShowHint({});
     setSecondsSpent(0);
     setSubmitError('');
+    setSelectedDragItemId(null);
     setSubmissionResult(null);
   }, [exercise.id]);
 
-  // Timer tick
+  // Seed initial order state when viewing an ordering question for the first time
+  useEffect(() => {
+    const q = exercise.questions?.[currentIdx];
+    if (q && q.type === 'ordering' && q.items && !Array.isArray(answers[q.id])) {
+      setAnswers((prev) => ({
+        ...prev,
+        [q.id]: getInitialOrderList(q.items!),
+      }));
+    }
+  }, [currentIdx, exercise.id]);
+
   useEffect(() => {
     if (submissionResult || existingGradedSubmission) return;
     const interval = setInterval(() => {
@@ -127,13 +227,14 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
       <div className="max-w-3xl mx-auto bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-4">
         <Lock className="w-8 h-8 text-emerald-500 mx-auto" />
         <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
-          Bài tập đã được chấm điểm và khóa sổ
+          Bài tập đã được giáo viên chấm điểm
         </h2>
         <p className="text-xs text-slate-600 dark:text-slate-300">
           Điểm chính thức: <strong className="text-emerald-600">{existingGradedSubmission.score}/10</strong>
           {existingGradedSubmission.teacherFeedback ? ` — Nhận xét GV: "${existingGradedSubmission.teacherFeedback}"` : ''}
         </p>
         <button
+          type="button"
           onClick={onBack}
           className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 dark:bg-white dark:text-slate-900 rounded-xl"
         >
@@ -148,6 +249,7 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
       <div className="max-w-3xl mx-auto bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-4">
         <p className="text-sm text-slate-500">Bộ bài tập này chưa có câu hỏi nào.</p>
         <button
+          type="button"
           onClick={onBack}
           className="px-4 py-2 text-xs font-semibold text-white bg-cyan-600 rounded-xl"
         >
@@ -179,9 +281,30 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
     handleSetAnswer(qId, next);
   };
 
+  const handleMoveOrderItem = (q: Question, idx: number, direction: -1 | 1) => {
+    const list: string[] = Array.isArray(answers[q.id])
+      ? [...answers[q.id]]
+      : getInitialOrderList(q.items || []);
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= list.length) return;
+    [list[idx], list[targetIdx]] = [list[targetIdx], list[idx]];
+    handleSetAnswer(q.id, list);
+  };
+
+  const handleAssignDragItem = (qId: string, itemId: string, zoneName: string) => {
+    const currentMap = typeof answers[qId] === 'object' && answers[qId] !== null ? { ...answers[qId] } : {};
+    if (zoneName) {
+      currentMap[itemId] = zoneName;
+    } else {
+      delete currentMap[itemId];
+    }
+    handleSetAnswer(qId, currentMap);
+    setSelectedDragItemId(null);
+  };
+
   const handleSubmit = async () => {
     if (!authToken) {
-      setSubmitError('Vui lòng đăng nhập tài khoản học sinh để nộp bài và lưu điểm XP.');
+      setSubmitError('Vui lòng đăng nhập tài khoản học sinh để nộp bài và lưu kết quả.');
       onRequireAuth?.();
       return;
     }
@@ -210,6 +333,9 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
         setSubmissionResult({
           submission: data.submission,
           xpEarned: data.xpEarned,
+          recommendedReviewLessons: Array.isArray(data.recommendedReviewLessons)
+            ? data.recommendedReviewLessons
+            : [],
         });
         persistSubmissionToFirestore(data.submission).catch(() => {});
         onSubmittedSuccess(data.submission, data.xpEarned);
@@ -225,39 +351,67 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
 
   if (submissionResult) {
     const sub = submissionResult.submission;
+    const autoCount = sub.autoGradedQuestions ?? sub.totalQuestions;
+    const isEssayOnly = sub.pendingEssayReview && autoCount === 0;
+
     return (
       <div className="max-w-3xl mx-auto space-y-6 pb-16">
-        <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 text-center shadow-lg space-y-4">
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-4">
           <div className="flex justify-center">
             <EduBotMascot
               size="md"
-              expression={sub.score >= 8 ? 'celebrating' : 'happy'}
+              expression={isEssayOnly ? 'happy' : sub.score >= 8 ? 'celebrating' : 'happy'}
               message={sub.feedback}
             />
           </div>
 
           <div className="space-y-1">
             <span className="text-xs font-semibold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider font-mono">
-              KẾT QUẢ BÀI LÀM
+              KẾT QUẢ BÀI LÀM {sub.attemptNumber ? `· LẦN ${sub.attemptNumber}` : ''}
             </span>
             <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white font-display">
-              {sub.score}/10 Điểm
+              {isEssayOnly ? 'Đã nộp phần tự luận' : `${sub.score}/10 Điểm`}
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Bạn đã trả lời đúng {sub.totalCorrect}/{sub.totalQuestions} câu hỏi trong {formatTimer(sub.timeSpentSeconds)}.
+              {isEssayOnly
+                ? `Hoàn thành trong ${formatTimer(sub.timeSpentSeconds)}. Thầy/cô giáo sẽ chấm theo tiêu chí đánh giá.`
+                : `Đúng ${sub.totalCorrect}/${autoCount} câu chấm tự động trong ${formatTimer(sub.timeSpentSeconds)}.${
+                    sub.pendingEssayReview ? ' Câu tự luận đang chờ giáo viên chấm.' : ''
+                  }`}
             </p>
           </div>
 
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 font-bold text-sm">
             <Sparkles className="w-4 h-4 text-amber-500" />
-            <span>+{submissionResult.xpEarned} Điểm Kinh Nghiệm (XP) nạp vào EduBot</span>
+            <span>+{submissionResult.xpEarned} XP</span>
           </div>
+
+          {submissionResult.recommendedReviewLessons.length > 0 && (
+            <div className="mt-4 p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 text-left border border-amber-200 dark:border-amber-800 space-y-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-300">
+                <BookOpen className="w-4 h-4" />
+                <span>Bài học gợi ý nên ôn lại từ các câu vừa làm sai:</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {submissionResult.recommendedReviewLessons.map((les) => (
+                  <button
+                    key={les.id}
+                    type="button"
+                    onClick={() => onOpenLesson?.(les.id)}
+                    className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-xs font-semibold text-amber-900 dark:text-amber-200 hover:border-cyan-500 transition-colors"
+                  >
+                    Ôn lại: {les.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {sub.misconceptionTags && sub.misconceptionTags.length > 0 && (
             <div className="mt-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 text-left border border-slate-200 dark:border-slate-700 space-y-2">
               <div className="flex items-center gap-2 text-xs font-bold text-amber-600 dark:text-amber-400">
                 <AlertCircle className="w-4 h-4" />
-                <span>EduBot lưu ý cho bạn các điểm cần củng cố:</span>
+                <span>Điểm cần lưu ý thêm:</span>
               </div>
               <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-1 list-disc list-inside">
                 {sub.misconceptionTags.map((tag, tIdx) => (
@@ -269,17 +423,20 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
 
           <div className="pt-4 flex justify-center gap-3">
             <button
+              type="button"
               onClick={onBack}
               className="px-5 py-2.5 text-xs sm:text-sm font-semibold text-white bg-slate-900 dark:bg-white dark:text-slate-900 rounded-xl hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
             >
-              Hoàn thành & Quay lại
+              Quay lại danh sách
             </button>
             <button
+              type="button"
               onClick={() => {
                 setSubmissionResult(null);
                 setAnswers({});
                 setCurrentIdx(0);
                 setSecondsSpent(0);
+                setSelectedDragItemId(null);
               }}
               className="px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-1.5"
             >
@@ -289,30 +446,65 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
           </div>
         </div>
 
+        {/* Attempt history */}
+        {previousAttempts.length > 0 && (
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white font-display">
+              Lịch sử các lần làm bài ({previousAttempts.length} lần)
+            </h3>
+            <div className="space-y-2 text-xs">
+              {previousAttempts.slice(0, 5).map((att, idx) => (
+                <div
+                  key={att.id}
+                  className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800"
+                >
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                    Lần {att.attemptNumber || previousAttempts.length - idx} ·{' '}
+                    {new Date(att.completedAt).toLocaleString('vi-VN')}
+                  </span>
+                  <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                    {att.pendingEssayReview && (att.autoGradedQuestions ?? 1) === 0
+                      ? 'Chờ GV chấm'
+                      : `${att.score}/10`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Detailed Solutions Section */}
         <div className="space-y-4">
           <h3 className="text-base font-bold text-slate-900 dark:text-white font-display">
-            Lời giải chi tiết từng câu hỏi
+            Giải thích từng câu hỏi
           </h3>
           {exercise.questions.map((q, idx) => {
             const studentAns = sub.answers[q.id];
-            const isCorrect = evaluateQuestionCorrectness(q, studentAns);
+            const status = evaluateQuestionStatus(q, studentAns);
+            const borderCls =
+              status === 'correct'
+                ? 'border-emerald-200 dark:border-emerald-900/60'
+                : status === 'pending_review'
+                ? 'border-amber-200 dark:border-amber-900/60'
+                : 'border-rose-200 dark:border-rose-900/60';
+
             return (
               <div
                 key={q.id}
-                className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border space-y-3 ${
-                  isCorrect
-                    ? 'border-emerald-200 dark:border-emerald-900/60'
-                    : 'border-rose-200 dark:border-rose-900/60'
-                }`}
+                className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border space-y-3 ${borderCls}`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-400 font-mono">Câu {idx + 1}</span>
-                    {isCorrect ? (
+                    {status === 'correct' ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                         <CheckCircle className="w-3.5 h-3.5" />
                         Chính xác
+                      </span>
+                    ) : status === 'pending_review' ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                        <Clock className="w-3.5 h-3.5" />
+                        Chờ giáo viên chấm theo tiêu chí
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400">
@@ -322,22 +514,32 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
                     )}
                   </div>
                   <span className="text-xs font-semibold text-cyan-600 dark:text-cyan-400">
-                    {q.difficulty === 'nhan_biet'
-                      ? 'Nhận biết'
-                      : q.difficulty === 'thong_hieu'
-                      ? 'Thông hiểu'
-                      : 'Vận dụng'}
+                    {DIFFICULTY_LABELS[q.difficulty] || q.difficulty}
                   </span>
                 </div>
+
                 <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                   {q.questionText}
                 </div>
+
                 <div className="text-xs text-slate-500 dark:text-slate-400">
                   <strong>Câu trả lời của bạn:</strong> {formatStudentAnswer(q, studentAns)}
                 </div>
+
+                {q.type === 'essay' && q.rubricCriteria && q.rubricCriteria.length > 0 && (
+                  <div className="text-xs text-amber-900 dark:text-amber-200 bg-amber-50/70 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-200 dark:border-amber-900/40 space-y-1">
+                    <strong className="block">Tiêu chí giáo viên dùng để đánh giá:</strong>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {q.rubricCriteria.map((rc, rIdx) => (
+                        <li key={rIdx}>{rc}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <div className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
                   <strong className="block text-cyan-600 dark:text-cyan-400 mb-1">
-                    Giải thích của EduBot:
+                    Giải thích:
                   </strong>
                   {q.explanation}
                 </div>
@@ -354,6 +556,7 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
       {/* Top Header Bar */}
       <div className="flex items-center justify-between">
         <button
+          type="button"
           onClick={onBack}
           className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 transition-colors"
         >
@@ -376,7 +579,7 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
       {/* Progress Track */}
       <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
         <div
-          className="bg-gradient-to-r from-cyan-500 to-blue-600 h-full transition-all duration-300"
+          className="bg-cyan-600 h-full transition-all duration-300"
           style={{ width: `${((currentIdx + 1) / totalQ) * 100}%` }}
         />
       </div>
@@ -389,12 +592,12 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
       )}
 
       {/* Question Card */}
-      <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
+      <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-6">
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs font-semibold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider">
-            <span>Dạng bài: {currentQ.type.replace('_', ' ')}</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-cyan-600 dark:text-cyan-400">
+            <span>{QUESTION_TYPE_LABELS[currentQ.type] || currentQ.type}</span>
             <span aria-hidden="true">·</span>
-            <span>Mức độ: {currentQ.difficulty}</span>
+            <span>{DIFFICULTY_LABELS[currentQ.difficulty] || currentQ.difficulty}</span>
           </div>
 
           <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white leading-relaxed">
@@ -403,35 +606,49 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
         </div>
 
         <div className="space-y-3">
-          {/* 1. Single Choice */}
-          {currentQ.type === 'single_choice' && currentQ.options && (
-            <div className="space-y-2.5">
-              {currentQ.options.map((opt, optIdx) => {
-                const isSelected = answers[currentQ.id] === optIdx;
-                return (
-                  <button
-                    key={optIdx}
-                    onClick={() => handleSetAnswer(currentQ.id, optIdx)}
-                    className={`w-full text-left p-4 rounded-xl border text-sm transition-all flex items-center gap-3.5 ${
-                      isSelected
-                        ? 'border-cyan-500 bg-cyan-50/70 dark:bg-cyan-950/40 text-cyan-900 dark:text-cyan-200 font-semibold shadow-sm'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-200'
-                    }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${
+          {/* 1. Single Choice or Scenario with options */}
+          {(currentQ.type === 'single_choice' || currentQ.type === 'scenario') &&
+            Array.isArray(currentQ.options) &&
+            currentQ.options.length > 0 && (
+              <div className="space-y-2.5">
+                {currentQ.options.map((opt, optIdx) => {
+                  const isSelected = answers[currentQ.id] === optIdx;
+                  return (
+                    <button
+                      key={optIdx}
+                      type="button"
+                      onClick={() => handleSetAnswer(currentQ.id, optIdx)}
+                      className={`w-full text-left p-4 rounded-xl border text-sm transition-colors flex items-center gap-3.5 ${
                         isSelected
-                          ? 'bg-cyan-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                          ? 'border-cyan-500 bg-cyan-50/70 dark:bg-cyan-950/40 text-cyan-900 dark:text-cyan-200 font-semibold'
+                          : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-200'
                       }`}
                     >
-                      {String.fromCharCode(65 + optIdx)}
-                    </span>
-                    <span>{opt}</span>
-                  </button>
-                );
-              })}
-            </div>
+                      <span
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${
+                          isSelected
+                            ? 'bg-cyan-500 text-white'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        {String.fromCharCode(65 + optIdx)}
+                      </span>
+                      <span>{opt}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+          {/* Scenario without options -> short text */}
+          {currentQ.type === 'scenario' && (!currentQ.options || currentQ.options.length === 0) && (
+            <input
+              type="text"
+              placeholder="Nhập cách xử lý của em..."
+              value={answers[currentQ.id] || ''}
+              onChange={(e) => handleSetAnswer(currentQ.id, e.target.value)}
+              className="w-full p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500"
+            />
           )}
 
           {/* 1b. Multi Choice */}
@@ -444,10 +661,11 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
                 return (
                   <button
                     key={optIdx}
+                    type="button"
                     onClick={() => handleToggleMultiChoice(currentQ.id, optIdx)}
-                    className={`w-full text-left p-4 rounded-xl border text-sm transition-all flex items-center gap-3.5 ${
+                    className={`w-full text-left p-4 rounded-xl border text-sm transition-colors flex items-center gap-3.5 ${
                       isSelected
-                        ? 'border-cyan-500 bg-cyan-50/70 dark:bg-cyan-950/40 text-cyan-900 dark:text-cyan-200 font-semibold shadow-sm'
+                        ? 'border-cyan-500 bg-cyan-50/70 dark:bg-cyan-950/40 text-cyan-900 dark:text-cyan-200 font-semibold'
                         : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-200'
                     }`}
                   >
@@ -471,20 +689,22 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
           {currentQ.type === 'true_false' && (
             <div className="grid grid-cols-2 gap-4">
               <button
+                type="button"
                 onClick={() => handleSetAnswer(currentQ.id, true)}
-                className={`p-4 rounded-2xl border text-center font-bold text-sm transition-all ${
+                className={`p-4 rounded-2xl border text-center font-bold text-sm transition-colors ${
                   answers[currentQ.id] === true
-                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 shadow-sm'
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
                     : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-700 dark:text-slate-200'
                 }`}
               >
                 ĐÚNG
               </button>
               <button
+                type="button"
                 onClick={() => handleSetAnswer(currentQ.id, false)}
-                className={`p-4 rounded-2xl border text-center font-bold text-sm transition-all ${
+                className={`p-4 rounded-2xl border text-center font-bold text-sm transition-colors ${
                   answers[currentQ.id] === false
-                    ? 'border-red-500 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 shadow-sm'
+                    ? 'border-red-500 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300'
                     : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-700 dark:text-slate-200'
                 }`}
               >
@@ -499,7 +719,7 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
               {currentQ.steps && (
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 space-y-2">
                   <div className="text-xs font-bold text-cyan-600 dark:text-cyan-400">
-                    Các bước tư duy:
+                    Các bước gợi ý:
                   </div>
                   {currentQ.steps.map((st) => (
                     <div key={st.stepNumber} className="text-xs text-slate-600 dark:text-slate-300 flex gap-2">
@@ -517,7 +737,7 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="Ví dụ: 3/5 hoặc 12"
+                  placeholder="Nhập đáp án..."
                   value={answers[currentQ.id] || ''}
                   onChange={(e) => handleSetAnswer(currentQ.id, e.target.value)}
                   className="w-full p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500 font-mono"
@@ -528,9 +748,19 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
 
           {/* 3b. Essay / Tự luận */}
           {currentQ.type === 'essay' && (
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-                Viết câu trả lời tự luận của em (thầy/cô sẽ chấm và nhận xét):
+            <div className="space-y-3">
+              {currentQ.rubricCriteria && currentQ.rubricCriteria.length > 0 && (
+                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                  <strong className="block">Tiêu chí đánh giá (Giáo viên sẽ chấm theo các ý này):</strong>
+                  <ul className="list-disc list-inside space-y-0.5">
+                    {currentQ.rubricCriteria.map((rc, rIdx) => (
+                      <li key={rIdx}>{rc}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400">
+                Viết câu trả lời tự luận của em:
               </label>
               <textarea
                 rows={5}
@@ -553,7 +783,7 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
                 return (
                   <div
                     key={pIdx}
-                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4"
+                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
                     <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
                       {p.left}
@@ -578,21 +808,157 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
               })}
             </div>
           )}
+
+          {/* 5. Ordering */}
+          {currentQ.type === 'ordering' && currentQ.items && (
+            <div className="space-y-2.5">
+              <div className="text-xs text-slate-500">
+                Dùng nút Lên / Xuống để sắp xếp các thẻ theo đúng thứ tự yêu cầu:
+              </div>
+              {(Array.isArray(answers[currentQ.id])
+                ? (answers[currentQ.id] as string[])
+                : getInitialOrderList(currentQ.items)
+              ).map((item, idx, arr) => (
+                <div
+                  key={`${item}-${idx}`}
+                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="w-6 h-6 rounded-full bg-cyan-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                      {idx + 1}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {item}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      aria-label={`Đưa ${item} lên trên`}
+                      disabled={idx === 0}
+                      onClick={() => handleMoveOrderItem(currentQ, idx, -1)}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-35 hover:border-cyan-500"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Đưa ${item} xuống dưới`}
+                      disabled={idx === arr.length - 1}
+                      onClick={() => handleMoveOrderItem(currentQ, idx, 1)}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-35 hover:border-cyan-500"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 6. Drag & Drop (with click-to-assign fallback for mobile/keyboard) */}
+          {currentQ.type === 'drag_drop' && currentQ.dragItems && currentQ.dropZones && (
+            <div className="space-y-4">
+              <div className="text-xs text-slate-500">
+                Kéo thẻ vào nhóm đúng (hoặc bấm chọn thẻ rồi bấm vào nhóm đích):
+              </div>
+
+              {/* Unassigned items */}
+              <div className="flex flex-wrap gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 min-h-[54px]">
+                {currentQ.dragItems
+                  .filter((it) => !(answers[currentQ.id] || {})[it.id])
+                  .map((it) => {
+                    const isPicked = selectedDragItemId === it.id;
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', it.id);
+                          setSelectedDragItemId(it.id);
+                        }}
+                        onClick={() => setSelectedDragItemId(isPicked ? null : it.id)}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-grab transition-colors ${
+                          isPicked
+                            ? 'bg-cyan-600 text-white border-cyan-600'
+                            : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-slate-300 dark:border-slate-700 hover:border-cyan-500'
+                        }`}
+                      >
+                        {it.label}
+                      </button>
+                    );
+                  })}
+                {currentQ.dragItems.every((it) => Boolean((answers[currentQ.id] || {})[it.id])) && (
+                  <span className="text-xs text-slate-400">Tất cả thẻ đã được xếp vào nhóm.</span>
+                )}
+              </div>
+
+              {/* Target Zones */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {currentQ.dropZones.map((zone) => {
+                  const zoneItems = currentQ.dragItems!.filter(
+                    (it) => (answers[currentQ.id] || {})[it.id] === zone
+                  );
+                  return (
+                    <div
+                      key={zone}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const itemId = e.dataTransfer.getData('text/plain') || selectedDragItemId;
+                        if (itemId) handleAssignDragItem(currentQ.id, itemId, zone);
+                      }}
+                      onClick={() => {
+                        if (selectedDragItemId) {
+                          handleAssignDragItem(currentQ.id, selectedDragItemId, zone);
+                        }
+                      }}
+                      className={`p-4 rounded-2xl border-2 border-dashed min-h-[110px] space-y-2 transition-colors ${
+                        selectedDragItemId
+                          ? 'border-cyan-400 bg-cyan-50/40 dark:bg-cyan-950/20 cursor-pointer'
+                          : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900'
+                      }`}
+                    >
+                      <div className="text-xs font-bold text-slate-700 dark:text-slate-200">{zone}</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {zoneItems.map((it) => (
+                          <button
+                            key={it.id}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAssignDragItem(currentQ.id, it.id, '');
+                            }}
+                            title="Bấm để gỡ thẻ ra"
+                            className="px-2.5 py-1 rounded-lg bg-cyan-600 text-white text-xs font-semibold hover:bg-rose-600 transition-colors"
+                          >
+                            {it.label} ×
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Pedagogical Hint Toggle */}
         <div className="pt-2">
           <button
+            type="button"
             onClick={() => setShowHint((prev) => ({ ...prev, [currentQ.id]: !prev[currentQ.id] }))}
             className="text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1.5"
           >
             <HelpCircle className="w-3.5 h-3.5" />
-            <span>{showHint[currentQ.id] ? 'Ẩn gợi ý' : 'Cần gợi ý từ EduBot?'}</span>
+            <span>{showHint[currentQ.id] ? 'Ẩn gợi ý' : 'Xem gợi ý cách làm'}</span>
           </button>
 
           {showHint[currentQ.id] && (
-            <div className="mt-2.5 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-900 dark:text-amber-200 leading-relaxed animate-in fade-in">
-              <strong>💡 Gợi ý của EduBot:</strong> {currentQ.pedagogicalHint}
+            <div className="mt-2.5 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
+              <strong>Gợi ý:</strong> {currentQ.pedagogicalHint}
             </div>
           )}
         </div>
@@ -600,6 +966,7 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
         {/* Footer Navigation Buttons */}
         <div className="pt-4 flex items-center justify-between border-t border-slate-100 dark:border-slate-800">
           <button
+            type="button"
             disabled={currentIdx === 0}
             onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))}
             className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -609,15 +976,17 @@ export const ExerciseRunner: React.FC<ExerciseRunnerProps> = ({
 
           {isLast ? (
             <button
+              type="button"
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className="px-5 py-2.5 text-xs font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-xl transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5 disabled:opacity-60"
+              className="px-5 py-2.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors flex items-center gap-1.5 disabled:opacity-60"
             >
               <CheckCircle className="w-4 h-4" />
-              <span>{isSubmitting ? 'Đang chấm điểm...' : 'Nộp bài & Xem điểm'}</span>
+              <span>{isSubmitting ? 'Đang chấm điểm...' : 'Nộp bài & Xem kết quả'}</span>
             </button>
           ) : (
             <button
+              type="button"
               onClick={() => setCurrentIdx((i) => Math.min(totalQ - 1, i + 1))}
               className="px-4 py-2 text-xs font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-xl transition-colors flex items-center gap-1.5"
             >

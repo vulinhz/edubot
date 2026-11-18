@@ -4,24 +4,33 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { AiDraftItem } from '../../types/index.ts';
-import { CheckCircle2, XCircle, Send, MessageSquare, History, BookOpen, AlertCircle } from 'lucide-react';
+import { AiDraftItem, Lesson } from '../../types/index.ts';
+import { CheckCircle2, XCircle, Send, MessageSquare, History, BookOpen, AlertCircle, BookPlus } from 'lucide-react';
 
 interface ContentReviewerProps {
   drafts: AiDraftItem[];
+  authToken?: string | null;
   onDraftStatusChange: (
     draftId: string,
     status: 'approved' | 'rejected' | 'published',
     notes?: string,
     editedContent?: any
   ) => void;
+  onPublishedToCurriculum?: (lesson: Lesson, updatedDraft: AiDraftItem) => void;
 }
 
-export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraftStatusChange }) => {
+export const ContentReviewer: React.FC<ContentReviewerProps> = ({
+  drafts,
+  authToken,
+  onDraftStatusChange,
+  onPublishedToCurriculum,
+}) => {
   const [selectedDraftId, setSelectedDraftId] = useState<string>(drafts[0]?.id || '');
   const [teacherNotes, setTeacherNotes] = useState('');
   const [editedText, setEditedText] = useState('');
   const [validationError, setValidationError] = useState('');
+  const [publishNotice, setPublishNotice] = useState('');
+  const [publishingToLib, setPublishingToLib] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'approved' | 'rejected' | 'published'>('all');
 
   const filteredDrafts = drafts.filter((d) => (statusFilter === 'all' ? true : d.status === statusFilter));
@@ -30,6 +39,7 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
   useEffect(() => {
     setTeacherNotes(activeDraft?.teacherNotes || '');
     setValidationError('');
+    setPublishNotice('');
     if (activeDraft) {
       setEditedText(
         activeDraft.content?.text ||
@@ -55,16 +65,45 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
     onDraftStatusChange(activeDraft.id, status, teacherNotes, updatedContent);
   };
 
+  const handlePublishToCurriculum = async () => {
+    if (!activeDraft || !authToken) return;
+    setPublishingToLib(true);
+    setValidationError('');
+    setPublishNotice('');
+    try {
+      const res = await fetch(`/api/ai/drafts/${activeDraft.id}/publish-to-curriculum`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setValidationError(data.error || 'Không thể đưa bản nháp vào Kho học liệu.');
+        return;
+      }
+      if (data.lesson && data.draft) {
+        onPublishedToCurriculum?.(data.lesson, data.draft);
+        setPublishNotice(`Đã đưa "${data.lesson.title}" vào Kho học liệu (${data.lesson.lessonCode}).`);
+      }
+    } catch {
+      setValidationError('Lỗi kết nối máy chủ khi xuất bản vào Kho học liệu.');
+    } finally {
+      setPublishingToLib(false);
+    }
+  };
+
   const getStatusBadge = (status: AiDraftItem['status']) => {
     switch (status) {
       case 'approved':
-        return { cls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40', label: 'Đã duyệt (Verified)' };
+        return { cls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40', label: 'Đã duyệt' };
       case 'published':
         return { cls: 'bg-purple-50 text-purple-600 dark:bg-purple-950/40', label: 'Đã xuất bản' };
       case 'rejected':
         return { cls: 'bg-rose-50 text-rose-600 dark:bg-rose-950/40', label: 'Cần chỉnh sửa' };
       default:
-        return { cls: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40', label: 'Bản nháp AI – Chờ duyệt' };
+        return { cls: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40', label: 'Bản nháp – Chờ duyệt' };
     }
   };
 
@@ -75,7 +114,7 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
           Hàng Đợi Kiểm Duyệt Học Liệu AI
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-          Quy trình bắt buộc: Chỉnh sửa trực tiếp, đối chiếu trích dẫn nguồn và lưu lịch sử kiểm duyệt trước khi xuất bản cho học sinh.
+          Chỉnh sửa trực tiếp, đối chiếu trích dẫn nguồn và đưa vào Kho học liệu sau khi duyệt.
         </p>
       </div>
 
@@ -92,6 +131,7 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
         ).map((st) => (
           <button
             key={st.id}
+            type="button"
             onClick={() => setStatusFilter(st.id)}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
               statusFilter === st.id
@@ -166,15 +206,17 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
                   {(activeDraft.status === 'draft' || activeDraft.status === 'rejected') && (
                     <>
                       <button
+                        type="button"
                         onClick={() => handleReviewAction('approved')}
                         className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Lưu chỉnh sửa & Duyệt</span>
+                        <span>Lưu chỉnh sửa &amp; Duyệt</span>
                       </button>
 
                       {activeDraft.status !== 'rejected' && (
                         <button
+                          type="button"
                           onClick={() => handleReviewAction('rejected')}
                           className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
                         >
@@ -186,13 +228,27 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
                   )}
 
                   {activeDraft.status === 'approved' && (
-                    <button
-                      onClick={() => handleReviewAction('published')}
-                      className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Xuất bản cho học sinh</span>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleReviewAction('published')}
+                        className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Xuất bản</span>
+                      </button>
+                      {authToken && (
+                        <button
+                          type="button"
+                          onClick={handlePublishToCurriculum}
+                          disabled={publishingToLib}
+                          className="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                        >
+                          <BookPlus className="w-3.5 h-3.5" />
+                          <span>{publishingToLib ? 'Đang đưa vào kho...' : 'Đưa vào Kho học liệu'}</span>
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -201,6 +257,13 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
                 <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>{validationError}</span>
+                </div>
+              )}
+
+              {publishNotice && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{publishNotice}</span>
                 </div>
               )}
 
@@ -222,7 +285,7 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
                 <div className="space-y-1.5">
                   <div className="text-xs font-semibold text-cyan-600 dark:text-cyan-400 flex items-center gap-1.5">
                     <BookOpen className="w-3.5 h-3.5" />
-                    <span>Nguồn RAG đã đối chiếu:</span>
+                    <span>Nguồn tài liệu đã đối chiếu:</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {activeDraft.citations.map((c) => (
@@ -238,7 +301,7 @@ export const ContentReviewer: React.FC<ContentReviewerProps> = ({ drafts, onDraf
               <div className="space-y-2 pt-2">
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                   <MessageSquare className="w-3.5 h-3.5 text-cyan-500" />
-                  <span>Ý kiến chuyên môn & Ghi chú điều chỉnh (Bắt buộc nếu từ chối):</span>
+                  <span>Ý kiến chuyên môn &amp; Ghi chú điều chỉnh (Bắt buộc nếu từ chối):</span>
                 </label>
                 <textarea
                   rows={2}

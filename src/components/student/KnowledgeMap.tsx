@@ -42,7 +42,7 @@ export const KnowledgeMap: React.FC<KnowledgeMapProps> = ({
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-xs font-semibold text-cyan-300 font-mono">
             <Compass className="w-4 h-4 text-cyan-400" />
-            <span>BẢN ĐỒ TRI THỨC TOÁN TIỂU HỌC 2026</span>
+            <span>BẢN ĐỒ TRI THỨC TOÁN TIỂU HỌC</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-white">
             Hành Trình Kiến Thức & Mối Quan Hệ Tiên Quyết

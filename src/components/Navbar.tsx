@@ -34,7 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (!currentUser) {
       return [
         { id: 'landing', label: 'Giới thiệu' },
-        { id: 'lessons', label: 'Kho bài giảng' },
+        { id: 'lessons', label: 'Kho học liệu' },
         { id: 'exercises', label: 'Luyện tập' },
         { id: 'knowledge-map', label: 'Bản đồ tri thức' },
       ];
@@ -42,7 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (currentUser.role === 'student') {
       return [
         { id: 'dashboard', label: 'Trang chủ' },
-        { id: 'lessons', label: 'Kho bài giảng' },
+        { id: 'lessons', label: 'Kho học liệu' },
         { id: 'exercises', label: 'Luyện tập' },
         { id: 'knowledge-map', label: 'Bản đồ tri thức' },
         { id: 'tutor', label: 'Gia sư EduBot' },
@@ -62,7 +62,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     } else {
       return [
         { id: 'admin-overview', label: 'Bảng điều khiển' },
-        { id: 'curriculum-manager', label: 'Khung GDPT 2026' },
+        { id: 'curriculum-manager', label: 'Khung chương trình' },
         { id: 'learning-resources', label: 'Kho thẩm định' },
         { id: 'audit-logs', label: 'Nhật ký bảo mật' },
         { id: 'landing', label: 'Giới thiệu' },

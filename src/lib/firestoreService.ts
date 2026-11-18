@@ -121,7 +121,7 @@ export async function persistSubmissionToFirestore(sub: StudentSubmission): Prom
       id: docId,
       studentId: uid,
       exerciseSetId: sanitizeId(sub.exerciseSetId),
-      assignmentId: sub.assignmentId ? sanitizeId(sub.assignmentId) : undefined,
+      ...(sub.assignmentId ? { assignmentId: sanitizeId(sub.assignmentId) } : {}),
       score: sub.score,
       status: 'submitted',
       createdAt: serverTimestamp(),

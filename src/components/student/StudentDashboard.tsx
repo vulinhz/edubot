@@ -36,6 +36,8 @@ interface StudentDashboardProps {
   lessons: Lesson[];
   submissions: StudentSubmission[];
   learningProgress?: LearningProgress[];
+  lastOpenedLessonId?: string | null;
+  recommendedReviewLessons?: { id: string; title: string; subjectId: string; grade: number }[];
   onSelectSubject: (subjectId: string) => void;
   onOpenLesson: (lessonId: string) => void;
   onOpenExercise: (exerciseSetId: string, assignmentId?: string) => void;
@@ -52,6 +54,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   lessons,
   submissions,
   learningProgress = [],
+  lastOpenedLessonId,
+  recommendedReviewLessons = [],
   onSelectSubject,
   onOpenLesson,
   onOpenExercise,
@@ -67,6 +71,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     learningProgress.filter((p) => p.completed).map((p) => p.lessonId)
   );
   const recentLesson =
+    (lastOpenedLessonId ? lessons.find((l) => l.id === lastOpenedLessonId) : undefined) ||
     lessons.find((l) => isLessonVerified(l.status) && !completedLessonIds.has(l.id)) ||
     lessons.find((l) => !completedLessonIds.has(l.id)) ||
     lessons[0];
@@ -132,20 +137,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             </div>
 
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight font-display text-white">
-              Chào mừng <span className="text-cyan-400">{user.name}</span> trở lại vũ trụ tri thức!
+              Chào <span className="text-cyan-400">{user.name}</span>! Hôm nay mình học gì nào?
             </h1>
 
             <p className="text-sm sm:text-base text-slate-300 font-normal leading-relaxed">
               {recentLesson ? (
                 <>
-                  Hôm nay EduBot gợi ý bài học <strong>{recentLesson.title}</strong> và{' '}
+                  Bài học gợi ý: <strong>{recentLesson.title}</strong>
                   {activeAssignments.length > 0
-                    ? `${activeAssignments.length} nhiệm vụ đang mở.`
-                    : 'các thử thách luyện tập thú vị.'}{' '}
-                  Bạn đã sẵn sàng tích lũy thêm điểm kinh nghiệm chưa?
+                    ? ` · Bạn có ${activeAssignments.length} nhiệm vụ cô giáo giao.`
+                    : '.'}
                 </>
               ) : (
-                'Chọn khối lớp và môn học yêu thích để khám phá bài giảng và thử thách tương tác cùng EduBot nhé!'
+                'Chọn lớp và môn học để bắt đầu bài giảng và luyện tập cùng EduBot.'
               )}
             </p>
 
@@ -156,7 +160,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   className="px-5 py-2.5 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl hover:from-cyan-600 hover:to-blue-700 transition-all shadow-md shadow-cyan-500/25 flex items-center gap-2"
                 >
                   <Play className="w-4 h-4 fill-white" />
-                  <span>Tiếp tục học bài gợi ý</span>
+                  <span>{lastOpenedLessonId ? 'Tiếp tục bài gần nhất' : 'Học bài gợi ý'}</span>
                 </button>
               )}
 
@@ -304,11 +308,33 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             </div>
           )}
 
+          {/* Recommended Review Lessons from actual wrong answers */}
+          {recommendedReviewLessons.length > 0 && (
+            <div className="bg-amber-50/70 dark:bg-amber-950/20 p-5 rounded-2xl border border-amber-200 dark:border-amber-800 space-y-3">
+              <div className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                Bài học nên ôn tập lại (từ các câu vừa làm sai)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {recommendedReviewLessons.slice(0, 4).map((les) => (
+                  <button
+                    key={les.id}
+                    type="button"
+                    onClick={() => onOpenLesson(les.id)}
+                    className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 hover:border-cyan-500 text-left flex items-center justify-between gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100"
+                  >
+                    <span className="truncate">{les.title}</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Subjects Grid */}
           <div className="pt-4 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
-                Các môn học Lớp {user.grade || 4} theo chuẩn GDPT 2018 &amp; TT 17/2025
+                Các môn học Lớp {user.grade || 4}
               </h2>
             </div>
 
@@ -400,7 +426,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 );
               })()}
               <div className="flex flex-col items-center gap-1">
-                <div className="w-7 h-7 rounded-full bg-amber-400 flex items-center justify-center text-slate-950 font-bold text-xs ring-4 ring-amber-400/30 animate-pulse">
+                <div className="w-7 h-7 rounded-full bg-amber-400 flex items-center justify-center text-slate-950 font-bold text-xs ring-4 ring-amber-400/30">
                   {user.grade || 4}
                 </div>
                 <span className="text-[10px] text-amber-300 font-semibold">Hiện tại</span>
