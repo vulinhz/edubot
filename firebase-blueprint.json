@@ -1,0 +1,367 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Publicly safe user identity summary without sensitive PII",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin"] },
+        "teacherApprovalStatus": { "type": "string", "enum": ["none", "pending", "approved", "rejected"] },
+        "grade": { "type": "integer" },
+        "school": { "type": "string", "maxLength": 150 },
+        "xp": { "type": "integer" },
+        "streakDays": { "type": "integer" },
+        "badges": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "role", "createdAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII document for user email and guardian contact",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 180 },
+        "guardianEmail": { "type": "string", "format": "email", "maxLength": 180 },
+        "consentVerified": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted marker document granting admin privileges",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "grantedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "createdAt"]
+    },
+    "TeacherProfile": {
+      "title": "TeacherProfile",
+      "description": "Teacher verification and school assignment record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "school": { "type": "string", "maxLength": 150 },
+        "approvalStatus": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "approvedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "approvalStatus", "createdAt"]
+    },
+    "StudentProfile": {
+      "title": "StudentProfile",
+      "description": "Student learning profile, grade, XP and badges",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "grade": { "type": "integer" },
+        "xp": { "type": "integer" },
+        "streakDays": { "type": "integer" },
+        "teacherNote": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "grade", "xp", "createdAt"]
+    },
+    "AcademicYear": {
+      "title": "AcademicYear",
+      "description": "Academic year definition for school terms",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "isActive", "createdAt"]
+    },
+    "ClassRoom": {
+      "title": "ClassRoom",
+      "description": "Primary school classroom managed by an approved teacher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 3, "maxLength": 20 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "grade": { "type": "integer" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherName": { "type": "string", "maxLength": 100 },
+        "academicYear": { "type": "string", "maxLength": 40 },
+        "studentCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "name", "grade", "teacherId", "createdAt"]
+    },
+    "ClassMember": {
+      "title": "ClassMember",
+      "description": "Subcollection entry linking a student to a classroom",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "role": { "type": "string", "enum": ["student"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["classId", "studentId", "studentName", "role", "createdAt"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "Vietnamese GDPT curriculum subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "code": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "grades": { "type": "array" },
+        "description": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "code", "createdAt"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Curriculum lesson with explicit verification status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "subjectId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "grade": { "type": "integer" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "lessonCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "summary": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["DRAFT", "NEEDS_REVIEW", "VERIFIED", "APPROVED", "PUBLISHED", "verified", "pending", "unverified", "ai_draft"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "subjectId", "grade", "title", "status", "createdAt"]
+    },
+    "Exercise": {
+      "title": "Exercise",
+      "description": "Exercise set associated with a grade and subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "subjectId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "grade": { "type": "integer" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "questionCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "subjectId", "grade", "createdBy", "createdAt"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Teacher assignment issued to a classroom",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "classId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "exerciseSetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "grade": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "closed"] },
+        "deadline": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "classId", "teacherId", "exerciseSetId", "title", "status", "createdAt"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Student exercise submission and immutable graded score",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "assignmentId": { "type": "string", "maxLength": 128 },
+        "exerciseSetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "score": { "type": "number" },
+        "status": { "type": "string", "enum": ["submitted", "graded"] },
+        "teacherFeedback": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "exerciseSetId", "score", "status", "createdAt"]
+    },
+    "LearningProgress": {
+      "title": "LearningProgress",
+      "description": "Student lesson completion and time tracking record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "lessonId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "completed": { "type": "boolean" },
+        "timeSpentSeconds": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "lessonId", "completed", "createdAt"]
+    },
+    "AiMessage": {
+      "title": "AiMessage",
+      "description": "Student-EduBot conversation turn isolated per user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sender": { "type": "string", "enum": ["student", "edubot"] },
+        "text": { "type": "string", "minLength": 1, "maxLength": 6000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "sender", "text", "createdAt"]
+    },
+    "AiGeneration": {
+      "title": "AiGeneration",
+      "description": "AI-generated draft lesson plan, quiz, or knowledge review",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["lesson_plan", "standardized_knowledge", "quiz_matrix"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "status": { "type": "string", "enum": ["draft", "approved", "rejected", "published"] },
+        "teacherNotes": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "authorId", "type", "title", "status", "createdAt"]
+    },
+    "ConsentRecord": {
+      "title": "ConsentRecord",
+      "description": "Verifiable parental consent record for underage learners",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "guardianEmail": { "type": "string", "format": "email", "maxLength": 180 },
+        "relationship": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "enum": ["pending", "verified", "revoked"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "guardianEmail", "status", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable security and compliance audit trail entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "action": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "actorId", "action", "createdAt"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Global platform configuration and child-safety policies",
+      "type": "object",
+      "properties": {
+        "childSafetyFilterEnabled": { "type": "boolean" },
+        "parentalConsentRequired": { "type": "boolean" },
+        "leaderboardEnabled": { "type": "boolean" },
+        "dataRetentionDays": { "type": "integer" },
+        "curriculumStandard": { "type": "string", "maxLength": 200 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["childSafetyFilterEnabled", "parentalConsentRequired", "dataRetentionDays"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Publicly minimal user summary profiles"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Owner/Admin-only private PII document"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Trusted admin role lookup collection"
+    },
+    "/teachers/{teacherId}": {
+      "schema": { "$ref": "#/entities/TeacherProfile" },
+      "description": "Teacher onboarding and admin approval registry"
+    },
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/StudentProfile" },
+      "description": "Student progress and teacher notes"
+    },
+    "/academicYears/{yearId}": {
+      "schema": { "$ref": "#/entities/AcademicYear" },
+      "description": "Academic year master records"
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/ClassRoom" },
+      "description": "Classrooms owned by approved teachers"
+    },
+    "/classes/{classId}/members/{studentId}": {
+      "schema": { "$ref": "#/entities/ClassMember" },
+      "description": "Membership records inside a classroom"
+    },
+    "/subjects/{subjectId}": {
+      "schema": { "$ref": "#/entities/Subject" },
+      "description": "Vietnamese GDPT curriculum subjects"
+    },
+    "/lessons/{lessonId}": {
+      "schema": { "$ref": "#/entities/Lesson" },
+      "description": "Curriculum lessons Grades 1-5"
+    },
+    "/exercises/{exerciseId}": {
+      "schema": { "$ref": "#/entities/Exercise" },
+      "description": "Interactive exercise banks"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/Assignment" },
+      "description": "Classroom homework assignments"
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/Submission" },
+      "description": "Student exercise submissions"
+    },
+    "/learningProgress/{progressId}": {
+      "schema": { "$ref": "#/entities/LearningProgress" },
+      "description": "Student lesson completion records"
+    },
+    "/aiConversations/{userId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/AiMessage" },
+      "description": "Private EduBot tutor chat turns"
+    },
+    "/aiGenerations/{generationId}": {
+      "schema": { "$ref": "#/entities/AiGeneration" },
+      "description": "Teacher AI lesson/quiz drafts and review status"
+    },
+    "/consentRecords/{consentId}": {
+      "schema": { "$ref": "#/entities/ConsentRecord" },
+      "description": "Verifiable parental consent records"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Security & compliance audit trail"
+    },
+    "/systemSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/SystemSettings" },
+      "description": "Global system and child safety settings"
+    }
+  }
+}

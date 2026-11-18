@@ -1,0 +1,8 @@
+{
+  "name": "Remix EduBot AI – Future Learning Ecosystem",
+  "description": "Nền tảng học tập thông minh và gia sư robot AI dành cho học sinh tiểu học (Lớp 1-5), cùng trợ lý soạn bài giảng và chuẩn hóa kiến thức cho giáo viên Việt Nam theo chương trình GDPT 2018/2026.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
